@@ -11,7 +11,7 @@
 #identifier is the string in the column names which identifies the manual entry columns. This can be a string or a vector of strings.
 tidy_barcodes <- function(data, identifier = c('_m','_manual')){
   for (id in identifier) {
-    barcode.cols <- names(data) %>% str_subset(id) %>% str_extract(paste0("^.*(?=",id,")")) %>% unique()
+    barcode.cols <- names(data) %>% str_subset(paste0(id,'$')) %>% str_extract(paste0("^.*(?=",id,")")) %>% unique()
     for (col in barcode.cols) {
       for (i in 1:nrow(data)) {
         
@@ -61,6 +61,52 @@ kobo_media <- function (url = "kf.kobotoolbox.org", uname, pwd, assetid, fsep = 
     return(FALSE)
   }
 }
+
+#function for adding serum sample daughter samples
+
+add_daughter_samples <- function(data){
+  data <- data %>% 
+    left_join(kobo.data$DTRANK_serum_sample_booking %>% 
+                select('sample', 'Serum_blood_parentID','Serum_blood_aliquot1','Serum_blood_aliquot2'),
+              by = 'Serum_blood_parentID') %>%
+    relocate(c('Serum_blood_aliquot1','Serum_blood_aliquot2'), .after = 'Serum_blood_parentID')
+}
+
+
+
+# #function for data frame download
+# kobo_df_download_2 <- function (url = "eu.kobotoolbox.org", uname = "", pwd = "", assetid = "", 
+#           all = "false", lang = "_default", hierarchy = "false", include_grp = "true", 
+#           grp_sep = "/", fsep = ";", multi_sel = "both", media_url = "true", 
+#           fields = NULL, sub_ids = NULL, sleep = 2) 
+# {
+#   new_export_details <- export_creator(url = url, uname = uname, 
+#                                        pwd = pwd, assetid = assetid, type = "csv", all = all, 
+#                                        lang = lang, hierarchy = hierarchy, include_grp = include_grp, 
+#                                        grp_sep = grp_sep, multi_sel = multi_sel, fields = fields, 
+#                                        media_url = media_url, sub_ids = sub_ids, sleep = sleep)
+#   Sys.sleep(sleep)
+#   if (is.null(new_export_details)) {
+#     print("export creation was not successful")
+#     return(NULL)
+#   }
+#   else {
+#     dff <- export_downloader(new_export_details[[1]], fsep, 
+#                              uname, pwd, sleep)
+#     deleteact <- DELETE(url = paste0(url, "/api/v2/assets/", 
+#                                      assetid, "/exports/", new_export_details[[2]], "/"), 
+#                         authenticate(user = uname, password = pwd), progress())
+#     while (is.na(deleteact$status_code) | is.null(deleteact$status_code)) {
+#       print("Attempting export deletion \n")
+#     }
+#     warn_for_status(deleteact, "delete export. Please delete manually.")
+#     if (deleteact$status_code == 204) 
+#       print("Export deleted from server")
+#     return(dff)
+#   }
+# }
+# 
+
 
 #' 
 #' # extract geoshape to wkt

@@ -35,9 +35,9 @@ mcp.95 <- vector("list",length(gps))
 iso.50 <- vector("list",length(gps)) #isopleths
 iso.95 <- vector("list",length(gps))
 
-herd.data <- data.frame(herd.ID = seq(1:6))
+gps.summary <- data.frame()
 
-sf_use_s2(FALSE)
+#sf_use_s2(FALSE)
 
 for (i in 1:length(gps)) {
   #### data cleaning & spatial analysis ####
@@ -82,7 +82,7 @@ for (i in 1:length(gps)) {
   }
 
   
-  }  
+  #}  
   
   #### GIS analysis ####
   
@@ -107,94 +107,96 @@ for (i in 1:length(gps)) {
   hr.95[[i]] <- hr_area(kde.95[[i]])
   hr.95[[i]]$area.km2 <- hr.95[[i]]$area*(1e-6)
   
+  gps.summary$ID[i] <- str_remove_all(list.files(here('input','raw','spatial','gps_collars'))[i],'.csv')
+  
   #kde area estimates from 50 and 95 isopleths
-  herd.data$hr.kde.50.m2[i] <- hr_area(kde.50[[i]])$area
-  herd.data$hr.kde.95.m2[i] <- hr_area(kde.95[[i]])$area
+  gps.summary$hr.kde.50.m2[i] <- hr_area(kde.50[[i]])$area
+  gps.summary$hr.kde.95.m2[i] <- hr_area(kde.95[[i]])$area
   
   #mcp area estimates from 50 and 95 levels
-  herd.data$hr.mcp.50.m2[i] <- hr_area(mcp.50[[i]])$area
-  herd.data$hr.mcp.95.m2[i] <- hr_area(mcp.95[[i]])$area
+  gps.summary$hr.mcp.50.m2[i] <- hr_area(mcp.50[[i]])$area
+  gps.summary$hr.mcp.95.m2[i] <- hr_area(mcp.95[[i]])$area
   
   #### movement calculations ####
   
   #claculate length of the track
-  herd.data$dist.m[i] <- st_length(as_sf_lines(mk.track[[i]]))
+  gps.summary$dist.m[i] <- st_length(as_sf_lines(mk.track[[i]]))
   
   #calcuate time difference
-  herd.data$time.h[i] <- difftime(gps[[i]]$DATETIME[nrow(gps[[i]])], gps[[i]]$DATETIME[1], units = "hours")
+  gps.summary$time.h[i] <- difftime(gps[[i]]$DATETIME[nrow(gps[[i]])], gps[[i]]$DATETIME[1], units = "hours")
   
   #calculate speed
-  herd.data$speed.kmh[i] <- (herd.data$dist.m[i]/1000)/herd.data$time.h[i]
+  gps.summary$speed.kmh[i] <- (gps.summary$dist.m[i]/1000)/gps.summary$time.h[i]
   
-  #### NDVI ####
-  
-  #import lansat rasters
-  lansat.red <- raster("C:/Users/sirim/Downloads/LC09_L2SP_168060_20220711_20220713_02_T1_SR_B4.TIF")
-  lansat.nir <- raster("C:/Users/sirim/Downloads/LC09_L2SP_168060_20220711_20220713_02_T1_SR_B5.TIF")
-  
-  pts <- st_transform(as_sf_points(mk.track[[i]]), crs = st_crs(32637))
-  
-  #crop rasters
-  lansat.red <- crop(lansat.red,extent(st_bbox(pts))+100)
-  lansat.nir <- crop(lansat.nir,extent(st_bbox(pts))+100)
-  
-  #ndvi
-  ndvi <- (lansat.nir - lansat.red)/(lansat.nir + lansat.red)
-  
-  #extract ndvi values
-  pts$NDVI <- raster::extract(ndvi, pts)
-  
-  #calculate proportion of points that fall in each ndvi class
-  herd.data$ndvi1[i] <- (sum(pts$NDVI>0.0 & pts$NDVI<=0.1))/nrow(pts)
-  herd.data$ndvi2[i] <- (sum(pts$NDVI>0.1 & pts$NDVI<=0.2))/nrow(pts)
-  herd.data$ndvi3[i] <- (sum(pts$NDVI>0.2 & pts$NDVI<=0.3))/nrow(pts)
-  herd.data$ndvi4[i] <- (sum(pts$NDVI>0.3 & pts$NDVI<=0.4))/nrow(pts)
-  herd.data$ndvi5[i] <- (sum(pts$NDVI>0.4 & pts$NDVI<=0.5))/nrow(pts)
-  
-  max(pts$NDVI) <=0.5
-  
-  herd.data$mean.ndvi[i] <- mean(pts$NDVI)
-  #plot(lansat.red)
-  #plot(pts$geometry, add = T)
+  # #### NDVI ####
+  # 
+  # #import lansat rasters
+  # lansat.red <- raster("C:/Users/sirim/Downloads/LC09_L2SP_168060_20220711_20220713_02_T1_SR_B4.TIF")
+  # lansat.nir <- raster("C:/Users/sirim/Downloads/LC09_L2SP_168060_20220711_20220713_02_T1_SR_B5.TIF")
+  # 
+  # pts <- st_transform(as_sf_points(mk.track[[i]]), crs = st_crs(32637))
+  # 
+  # #crop rasters
+  # lansat.red <- crop(lansat.red,extent(st_bbox(pts))+100)
+  # lansat.nir <- crop(lansat.nir,extent(st_bbox(pts))+100)
+  # 
+  # #ndvi
+  # ndvi <- (lansat.nir - lansat.red)/(lansat.nir + lansat.red)
+  # 
+  # #extract ndvi values
+  # pts$NDVI <- raster::extract(ndvi, pts)
+  # 
+  # #calculate proportion of points that fall in each ndvi class
+  # herd.data$ndvi1[i] <- (sum(pts$NDVI>0.0 & pts$NDVI<=0.1))/nrow(pts)
+  # herd.data$ndvi2[i] <- (sum(pts$NDVI>0.1 & pts$NDVI<=0.2))/nrow(pts)
+  # herd.data$ndvi3[i] <- (sum(pts$NDVI>0.2 & pts$NDVI<=0.3))/nrow(pts)
+  # herd.data$ndvi4[i] <- (sum(pts$NDVI>0.3 & pts$NDVI<=0.4))/nrow(pts)
+  # herd.data$ndvi5[i] <- (sum(pts$NDVI>0.4 & pts$NDVI<=0.5))/nrow(pts)
+  # 
+  # max(pts$NDVI) <=0.5
+  # 
+  # herd.data$mean.ndvi[i] <- mean(pts$NDVI)
+  # #plot(lansat.red)
+  # #plot(pts$geometry, add = T)
   
   
   #### mapping & image export ####
   
-  # tm <- tm_shape(kde.95[[i]]$ud$layer) +
-  #   tm_raster(palette = "BuPu", colorNA = "white", n = 20, legend.show = F) +
-  #   tm_shape(mcp.95[[i]]$mcp) + tm_borders(col = "Red") +
-  #   tm_shape(mcp.50[[i]]$mcp) + tm_borders(col = "Red", lty = "dashed") +
-  #   tm_shape(iso.95[[i]]) + tm_borders(col = "blue") +
-  #   tm_shape(iso.50[[i]]) + tm_borders(col = "blue", lty = "dashed") +
-  #   tm_layout(title = paste("Camel Home Range - Herd",i), asp = 1, frame = T) +
-  #   tm_scale_bar(position = c("left", "bottom")) +
-  #   tm_compass(position = c("right", "bottom"))
-  # 
-  # #save the file
-  # tmap_save(tm, filename = paste("./GPS Collar Data/herd_",i,".jpg", sep = ""))
-  # 
-  # #mapping & image export
-  # tm.mcp <- tm_shape(kde.95[[i]]$ud$layer) +
-  #   tm_raster(palette = "BuPu", colorNA = "white", n = 20, legend.show = F) +
-  #   tm_shape(mcp.95[[i]]$mcp) + tm_borders(col = "Red") +
-  #   tm_shape(mcp.50[[i]]$mcp) + tm_borders(col = "Red", lty = "dashed") +
-  #   tm_layout(title = paste("Camel Home Range Minimum Convex Polygons - Herd",i), asp = 1, frame = T) +
-  #   tm_scale_bar(position = c("left", "bottom"))
-  # 
-  # #save the file
-  # tmap_save(tm.mcp, filename = paste("./GPS Collar Data/mcp_herd_",i,".jpg", sep = ""))
-  # 
-  # #mapping & image export
-  # tm.kde <- tm_shape(kde.95[[i]]$ud$layer) +
-  #   tm_raster(palette = "BuPu", colorNA = "white", n = 20, legend.show = F) +
-  #   tm_shape(iso.95[[i]]) + tm_borders(col = "blue") +
-  #   tm_shape(iso.50[[i]]) + tm_borders(col = "blue", lty = "dashed") +
-  #   tm_layout(title = paste("Camel Home Range Kernel Density Estimates - Herd",i), asp = 1, frame = T) +
-  #   tm_scale_bar(position = c("left", "bottom"))
-  # 
-  # #save the file
-  # tmap_save(tm.kde, filename = paste("./GPS Collar Data/kde_herd_",i,".jpg", sep = ""))
-  
+  tm <- tm_shape(kde.95[[i]]$ud$lyr.1) +
+    tm_raster(palette = "BuPu", colorNA = "white", n = 20, legend.show = F) +
+    tm_shape(mcp.95[[i]]$mcp) + tm_borders(col = "Red") +
+    tm_shape(mcp.50[[i]]$mcp) + tm_borders(col = "Red", lty = "dashed") +
+    tm_shape(iso.95[[i]]) + tm_borders(col = "blue") +
+    tm_shape(iso.50[[i]]) + tm_borders(col = "blue", lty = "dashed") +
+    tm_layout(title = paste("Home Range - ",gps.summary$ID[i]), asp = 1, frame = T) +
+    tm_scale_bar(position = c("left", "bottom")) +
+    tm_compass(position = c("right", "bottom"))
+
+  #save the file
+  tmap_save(tm, filename = here('output','spatial',paste0(gps.summary$ID[i],'_all.jpg')))
+
+  #mapping & image export
+  tm.mcp <- tm_shape(kde.95[[i]]$ud$lyr.1) +
+    tm_raster(palette = "BuPu", colorNA = "white", n = 20, legend.show = F) +
+    tm_shape(mcp.95[[i]]$mcp) + tm_borders(col = "Red") +
+    tm_shape(mcp.50[[i]]$mcp) + tm_borders(col = "Red", lty = "dashed") +
+    tm_layout(title = paste("Home Range Minimum Convex Polygons - ",gps.summary$ID[i]), asp = 1, frame = T) +
+    tm_scale_bar(position = c("left", "bottom"))
+
+  #save the file
+  tmap_save(tm.mcp, filename = here('output','spatial',paste0(gps.summary$ID[i],'_MCP.jpg')))
+
+  #mapping & image export
+  tm.kde <- tm_shape(kde.95[[i]]$ud$lyr.1) +
+    tm_raster(palette = "BuPu", colorNA = "white", n = 20, legend.show = F) +
+    tm_shape(iso.95[[i]]) + tm_borders(col = "blue") +
+    tm_shape(iso.50[[i]]) + tm_borders(col = "blue", lty = "dashed") +
+    tm_layout(title = paste("Home Range by Kernel Density Estimation - ",gps.summary$ID[i]), asp = 1, frame = T) +
+    tm_scale_bar(position = c("left", "bottom"))
+
+  #save the file
+  tmap_save(tm.kde, filename = here('output','spatial',paste0(gps.summary$ID[i],'_KDE.jpg')))
+
   
   
   ############ NDVI images ###########
