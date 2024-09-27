@@ -3,7 +3,6 @@
 # April 2024
 
 
-#### setup ----
 library(tidyverse)
 library(here)
 library(robotoolbox)
@@ -18,21 +17,21 @@ source(here('code','0_functions.R'))
 uname <-  "dtrank_master"
 pwd <-  "M!tchbc13579"
 url <-  "kf.kobotoolbox.org"
-# ####setup----
-# #for robotoolbox package
+####setup----
+#for robotoolbox package
 kobo_setup(url = "https://kf.kobotoolbox.org/",
            token = "1123cf35535bde15c4452187ba990a616dc492c0")
 #get list of assets
 kobo.projects <- kobo_asset_list()
-# 
-# ####data download-----
-# #forms with repeats
-# ##activity space mapping
-# #forms with media
-# ##GPS vector- gps files
-# ##wildlife sampling- images
-# ##ecotones- images
-# ##FGD- audio, images
+
+####data download-----
+#forms with repeats
+##activity space mapping
+#forms with media
+##GPS vector- gps files
+##wildlife sampling- images
+##ecotones- images
+##FGD- audio, images
 
 
 #download all data and write to .csv
@@ -51,11 +50,27 @@ for (i in 1:nrow(kobo.projects)) {
       #mutate(across(everything(), ~ replace(.x, (.x==''), NA))) %>%
       tidy_barcodes()
     
+    ## misc data cleaning
+    #GPS-vector - camel with ceres tag but no short term collar in DHH0100053
+    if (kobo.projects$name[i] == 'DTRANK_GPS_vector'){
+      data[data$`_uuid`=='aab5f780-58a5-464f-936c-cae41509539f','gps_logger_id_initial'] <- NA
+    }
+    
+    #individual_human - tidy ages
+    if (kobo.projects$name[i] == 'DTRANK_individual_human'){
+      data <- data %>% mutate(
+        participant_age = ifelse(is.na(participant_age),as.numeric(age),participant_age),
+        participant_age = round(participant_age)) %>% 
+        select(-c(dob, participant_dob, age))
+    }
+    
+    #store datasets in list
     kobo.data[[kobo.projects$name[i]]] <- data  
     
     if (kobo.projects$name[i] == 'DTRANK_activity_space_mapping'){
       data <- data$main
     }
+    
     
     #save
     write.csv(data %>% select(-`_attachments`),
@@ -71,6 +86,7 @@ for (i in 1:nrow(kobo.projects)) {
 #### blood sample daughter codes & data checks -----
 # re-attach serum sample daughter ID to individual human and livestock data,
 # check for data entry errors
+missing.entries <- list()
 for (j in c('DTRANK_wildlife_sampling','DTRANK_individual_human','DTRANK_individual_livestock')) {
   
   #change wildlife column name to allow joining
@@ -92,13 +108,14 @@ for (j in c('DTRANK_wildlife_sampling','DTRANK_individual_human','DTRANK_individ
   if(nrow(kobo.data$DTRANK_serum_sample_booking %>% filter(sample == ifelse(j == 'DTRANK_wildlife_sampling','wildlife',
                                                                             ifelse(j == 'DTRANK_individual_human','human',
                                                                                    'livestock')))) != nrow(kobo.data[[j]])){
-    print('The number of ',ifelse(j == 'DTRANK_wildlife_sampling','wildlife',
-                                  ifelse(j == 'DTRANK_individual_human','human',
-                                         'livestock')),' entries in the serum_sample_booking data are different to the number of entries in the ',
-          j,' data')
-    print(paste0('serum_sample_booking: ',nrow(DTRANK_serum_sample_booking %>% filter(sample == ifelse(j == 'DTRANK_wildlife_sampling','wildlife',
-                                                                                                       ifelse(j == 'DTRANK_individual_human','human',
-                                                                                                              'livestock'))))))
+    print(paste0('The number of ',ifelse(j == 'DTRANK_wildlife_sampling','wildlife',
+                                         ifelse(j == 'DTRANK_individual_human','human',
+                                                'livestock')),' entries in the serum_sample_booking data are different to the number of entries in the ',
+                 j,' data'))
+    
+    print(paste0('serum_sample_booking: ',nrow(kobo.data$DTRANK_serum_sample_booking %>% filter(sample == ifelse(j == 'DTRANK_wildlife_sampling','wildlife',
+                                                                                                                 ifelse(j == 'DTRANK_individual_human','human',
+                                                                                                                        'livestock'))))))
     print(paste0(j,': ',nrow(kobo.data[[j]])))
     
     #entries in serum_sample_booking that are not in individual sample datasets
@@ -111,12 +128,18 @@ for (j in c('DTRANK_wildlife_sampling','DTRANK_individual_human','DTRANK_individ
                                                                               ifelse(j == 'DTRANK_individual_human','human',
                                                                                      'livestock')) & 
                                                                (Serum_blood_parentID %!in% kobo.data[[j]]$Serum_blood_parentID)))
-    }
+    
+      missing.entries[['DTRANK_serum_sample_booking']] <- kobo.data$DTRANK_serum_sample_booking %>% filter(sample == ifelse(j == 'DTRANK_wildlife_sampling','wildlife',
+                                                                                         ifelse(j == 'DTRANK_individual_human','human',
+                                                                                                'livestock')) & 
+                                                                          (Serum_blood_parentID %!in% kobo.data[[j]]$Serum_blood_parentID))
+      }
     
     #entries in individual sample datasets that are not in the serum_sample_booking data
     if(nrow(kobo.data[[j]] %>% filter(Serum_blood_parentID %!in% kobo.data$DTRANK_serum_sample_booking$Serum_blood_parentID))>0){
       print(paste0('These entries are in the ',j,' data but not in the serum_sample_booking data'))
       print(kobo.data[[j]] %>% filter(Serum_blood_parentID %!in% kobo.data$DTRANK_serum_sample_booking$Serum_blood_parentID))
+      missing.entries[[j]] <- kobo.data[[j]] %>% filter(Serum_blood_parentID %!in% kobo.data$DTRANK_serum_sample_booking$Serum_blood_parentID)
     }
   }    
   
@@ -137,7 +160,7 @@ area <- list()
 
 for (type in names(kobo.data$DTRANK_activity_space_mapping)[2:length(kobo.data$DTRANK_activity_space_mapping)]) {
   #note - for some reason when downloading from the server, some of the wrong columns are included in the repeat datasets
- 
+  
   #points data
   if (type %!in% c('grazing_rep','crops_rep')) {
     pts[[type]] <- dm_flatten_to_tbl(kobo.data$DTRANK_activity_space_mapping,.start = !!as.name(type),.join=left_join) %>%
@@ -207,7 +230,7 @@ for (section in unique(kobo.data$DTRANK_GPS_vector$collection)) {
       select(date,county,ward,collection,hh_id,
              contains('acaracide'),
              contains(section)) %>%
-      filter(collection == section)# %>%
+      filter(collection == section & gps_tick_initial == 'gps_tick')# %>%
     #rename_with(~str_remove_all(., c('.gps_info_initial|.vectors_initial|.gps_info_final|.vectors_final')))
   } else if (section == 'environment'){
     gps.vector.data[[section]] <- kobo.data$DTRANK_GPS_vector %>% 
@@ -257,34 +280,82 @@ write.csv(select(gps.collars,-`_attachments`), here('output','spatial','gps_coll
 
 
 #### download movement tracks ----
-##livestock movement
+######livestock movement ----
 gps.collar.data <- list()
 for (i in 1:nrow(gps.collars)) {
-  #download media file
-  media.file <- content(GET(url = gps.collars$`_attachments`[[i]]$download_url,
-                            config = authenticate(user=uname,password=pwd)),
-                        as='text', encoding = 'UTF-8') %>% 
-    #parse to dataframe
-    read.table(text=., header = TRUE, fill = TRUE, sep = ",")
-  #save to list for further cleaning
-  gps.collar.data[[i]] <- media.file
-  
-  #export to folder
-  write.csv(media.file,here('input','raw','spatial','gps_collars',paste0(gps.collars$hh_id[i],
-                                                                         '_',
-                                                                         gps.collars$livestock_species[i],
-                                                                         '_',
-                                                                         gps.collars$gps_logger_id[i],
-                                                                         '.csv')),
-            row.names = F,
-            na = '')
+  if (paste0(gps.collars$hh_id[i],'_',
+             gps.collars$livestock_species[i],'_',
+             gps.collars$gps_logger_id[i],'.csv') %!in% list.files(here('input','raw','spatial','gps_collars')) &
+      
+      !is.null(unlist(gps.collars$`_attachments`[i]))) {
+    
+    # deal with .zip files
+    if (str_detect(gps.collars$`_attachments`[[i]]$filename,'.zip')){#.zip files - DHH010038_sheep_7.csv
+
+      media.file <- content(GET(url = gps.collars$`_attachments`[[i]]$download_url,
+                                config = authenticate(user=uname,password=pwd)),
+                            as='raw') %>% 
+        #write .zip files
+        writeBin(here('input','raw','spatial','gps_collars','zip_files',paste0(gps.collars$hh_id[i],
+                                                                               '_',
+                                                                               gps.collars$livestock_species[i],
+                                                                               '_',
+                                                                               gps.collars$gps_logger_id[i],
+                                                                               '.zip')))
+      
+      #create a temporary folder to dump extracted .csv files
+      temp <- tempfile()
+      #unzip downloaded .zip file
+      unzip(here('input','raw','spatial','gps_collars','zip_files',paste0(gps.collars$hh_id[i],
+                                                                          '_',
+                                                                          gps.collars$livestock_species[i],
+                                                                          '_',
+                                                                          gps.collars$gps_logger_id[i],
+                                                                          '.zip')), exdir = temp)
+      #ream and row bind all extracted .csv files
+      media.file <- do.call(rbind, lapply(list.files(temp, full.names = T), read.csv))
+      #remove temporary folder
+      unlink(temp)
+      
+    } else {
+      ##  #download media file
+      media.file <- content(GET(url = gps.collars$`_attachments`[[i]]$download_url,
+                                config = authenticate(user=uname,password=pwd)),
+                            as='text', encoding = 'UTF-8') %>%
+        #parse to dataframe
+        read.table(text=., header = TRUE, fill = TRUE, sep = ",")
+    }
+    
+    if (nrow(media.file)>0) {#DHH010038_sheep_7 - zip file
+      
+      #save to list for further cleaning
+      gps.collar.data[[i]] <- media.file
+      
+      #export to folder
+      write.csv(media.file,here('input','raw','spatial','gps_collars',paste0(gps.collars$hh_id[i],
+                                                                             '_',
+                                                                             gps.collars$livestock_species[i],
+                                                                             '_',
+                                                                             gps.collars$gps_logger_id[i],
+                                                                             '.csv')),
+                row.names = F,
+                na = '')
+    }
+  }
 }
 
-##human movement
+
+######human movement ----
 gps.human.data <- list()
 for (i in 1:nrow(gps.vector.data$human)) {
-  if (!is.na(gps.vector.data$human$gps_track_file_human[i]) & 
-      gps.vector.data$human$gps_track_file_human[i] != ''){
+  if (paste0(gps.vector.data$human$hh_id[i],'_',
+             gps.vector.data$human$collection[i],'_',
+             gps.vector.data$human$gps_logger_id_human[i],'.csv') %!in% list.files(here('input','raw','spatial','human_movement')) &
+      
+      !is.na(gps.vector.data$human$gps_track_file_human[i]) & 
+      
+      gps.vector.data$human$gps_track_file_human[i] != '')
+  {
     #download media file
     if (str_detect(gps.vector.data$human$gps_track_file_human[i],'.csv')){#.csv files
       media.file <- content(GET(url = gps.vector.data$human$`_attachments`[[i]]$download_url,
@@ -300,14 +371,15 @@ for (i in 1:nrow(gps.vector.data$human)) {
       content(GET(url = gps.vector.data$human$`_attachments`[[i]]$download_url,
                   config = authenticate(user=uname,password=pwd)),
               as='raw') %>% 
-        #parse to dataframe - .gpx files
         
+        #write .gpx files
         writeBin(here('input','raw','spatial','human_movement','GPX_files',paste0(gps.vector.data$human$hh_id[i],
                                                                                   '_',
                                                                                   gps.vector.data$human$collection[i],
                                                                                   '_',
                                                                                   gps.vector.data$human$gps_logger_id_human[i],
                                                                                   '.gpx')))
+      #read from written .gpx file
       media.file <- st_read(here('input','raw','spatial','human_movement','GPX_files',paste0(gps.vector.data$human$hh_id[i],
                                                                                              '_',
                                                                                              gps.vector.data$human$collection[i],
@@ -336,6 +408,54 @@ for (i in 1:nrow(gps.vector.data$human)) {
   }
 }
 
+
+####summary table-----
+human <- kobo.data$DTRANK_individual_human %>%
+  summarise(blood.samples = n(),
+            GPS.tracks = sum(movement_study=='yes')) %>%
+  mutate(ID = 'Human')
+
+# ticks <- gps.collars %>%
+#   group_by(livestock_species) %>%
+#   summarise(blood.samples = n(),
+#             Ceres.tags = sum(!is.na(ceres_tag_id)),
+#             Ticks = sum(ticks_initial_total, na.rm = T) + 
+#               sum(ticks_final_total, na.rm = T))
+## NB 25 goats in GPS_vector data but only 24 in livestock data---??
+livestock <- kobo.data$DTRANK_individual_livestock %>%
+  group_by(livestock_species) %>%
+  summarise(blood.samples = n(),
+            GPS.tracks = sum(short_term_selected=='yes'),
+            Ceres.tags = sum(long_term_selected=='yes')) %>%
+  left_join(gps.collars %>%
+              group_by(livestock_species) %>%
+              summarise(Ticks = sum(ticks_initial_total, na.rm = T) + 
+                          sum(ticks_final_total, na.rm = T))) %>%
+  mutate(across(where(is.numeric), ~ na_if(., 0))) %>%
+  rename(ID = livestock_species)
+#create total row
+live.tot <- livestock %>% summarize(across(where(is.numeric), sum, na.rm = TRUE)) %>%
+  mutate(ID = "Livestock Total")
+livestock <- bind_rows(livestock, live.tot)
+rm(live.tot)
+
+wildlife <- kobo.data$DTRANK_wildlife_sampling %>%
+  group_by(secb_aclass) %>%
+  summarise(blood.samples = n(),
+            Ticks = sum(secd_ectoparasites, na.rm = T)) %>%
+  mutate(secb_aclass = c('rodents','birds')) %>%
+  rename(ID = secb_aclass)
+#create total row
+wild.tot <- wildlife %>% summarize(across(where(is.numeric), sum, na.rm = TRUE)) %>%
+  mutate(ID = "Wildlife Total")
+wildlife <- bind_rows(wildlife,wild.tot)
+rm(wild.tot)
+
+#create summary table
+sample.sum <- bind_rows(human, livestock, wildlife) %>%
+  select(Species = ID, everything()) %>%
+  mutate(Species = str_to_title(Species))
+write.csv(sample.sum, here('output','sample_summary.csv'), row.names = F, na='')
 
 ##end------
 

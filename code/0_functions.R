@@ -25,6 +25,56 @@ tidy_barcodes <- function(data, identifier = c('_m','_manual')){
   return(data)
 }
 
+#function for adding identifier to separate communities in same ward
+# add_community_id <- function(data) {
+#   
+#   data <- data %>%
+#     arrange(ward, as_date(date)) %>%
+#     group_by(ward) %>%
+#     mutate(
+#       day_diff = as.numeric(difftime(as_date(date), lag(as_date(date)), units = "days")),
+#       session_break = ifelse(is.na(day_diff) | day_diff > 3, 1, 0),
+#       session_id = cumsum(session_break),
+#       session_multi = max(session_id)
+#     ) %>%
+#     ungroup() %>%
+#     mutate(
+#       ward = ifelse(session_multi > 1, 
+#                     paste(ward, as.character(session_id), sep = '_'), 
+#                     ward))%>%
+#     select(-c(day_diff, session_break, session_id, session_multi)) %>%
+#     arrange(as_date(date))
+#   
+#   return(data)
+# }
+
+add_community_id <- function(data, column_name = 'ward') {
+  if (column_name %in% names(data)) {
+    data <- data %>%
+      arrange(!!sym(column_name), as_date(date)) %>%
+      group_by(!!sym(column_name)) %>%
+      mutate(
+        day_diff = as.numeric(difftime(as_date(date), lag(as_date(date)), units = "days")),
+        session_break = ifelse(is.na(day_diff) | day_diff > 3, 1, 0),
+        session_id = cumsum(session_break),
+        session_multi = max(session_id)
+      ) %>%
+      ungroup() %>%
+       mutate(
+        !!sym(column_name) := ifelse(session_multi > 1,
+                                    paste(!!sym(column_name), as.character(session_id), sep = '_'),
+                                    !!sym(column_name))
+      ) %>%
+      select(-c(day_diff, session_break, session_id, session_multi)) %>%
+      arrange(as_date(date))
+    
+    return(data)
+    
+  } else {
+    stop("The specified column name is not present in the data.")
+  }
+}
+
 
 #function for Kobo media download
 #depends on KobocollectR
