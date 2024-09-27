@@ -2,3 +2,10 @@
 .Rhistory
 .RData
 .Ruserdata
+
+*.csv
+*.gpx
+*.zip
+*.tif
+*.jpg
+*.html
