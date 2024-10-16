@@ -8,4 +8,6 @@
 *.zip
 *.tif
 *.jpg
+*.png
 *.html
+*.gpkg

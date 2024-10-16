@@ -76,42 +76,6 @@ add_community_id <- function(data, column_name = 'ward') {
 }
 
 
-#function for Kobo media download
-#depends on KobocollectR
-#need to edit for robotoolbox
-kobo_media <- function (url = "kf.kobotoolbox.org", uname, pwd, assetid, fsep = ";", 
-                        sleep = 2, identifier = "URL", timeoutval = 300, destfolder = "media") 
-{
-  dat <- kobo_df_download(url = url, uname = uname, pwd = pwd, 
-                          assetid = assetid, lang = "_xml", sleep = sleep, 
-                          fsep = fsep)
-  if (!is.null(dat)) {
-    cnamesdat <- colnames(dat)
-    urlcols <- cnamesdat[grepl(paste0("*", identifier), cnamesdat)]
-    options(timeout = max(timeoutval, getOption("timeout")))
-    if (!file.exists(destfolder)) {
-      dir.create(destfolder)
-    }
-    for (i in 1:nrow(dat)) {
-      if (dat[,urlcols[1]][i] != ''){
-        media.file <- content(GET(url = dat[,urlcols[1]][i], config = authenticate(user=uname,password=pwd)),
-                              as='raw')
-        writeBin(media.file,here(destfolder,paste0(dat$hh_id[i],
-                                                   '_',
-                                                   dat$livestock_species_final[i],#need to edit to make this more robust to different column names
-                                                   '_',
-                                                   dat$gps_logger_id_initial[i],
-                                                   '.csv')))
-      }
-    }
-    return(TRUE)
-  }
-  else {
-    print("Data could not be downloaded. Please try again or check the parameters.")
-    return(FALSE)
-  }
-}
-
 #function for adding serum sample daughter samples
 
 add_daughter_samples <- function(data){
@@ -121,6 +85,80 @@ add_daughter_samples <- function(data){
               by = 'Serum_blood_parentID') %>%
     relocate(c('Serum_blood_aliquot1','Serum_blood_aliquot2'), .after = 'Serum_blood_parentID')
 }
+
+#function to remove unnecessary columns
+tidy_strip_pii <- function(data) {
+  data <- data %>% select(everything(),
+                          -any_of(c('start', 'end', 'dev_id', 'deprecatedID', 'rootUuid', 'uuid', 'instanceID')),
+                          -starts_with('_'),
+                          '_uuid')#, 
+}
+
+
+#function for uploading all files matching a pattern in a local folder to google drive
+upload_to_google <- function(source.folder,dest.folder, pattern){
+  #get list of existing files
+  uploaded.files <- drive_ls(path = dest.folder, pattern = pattern)
+  
+  #loop through 
+  for (file in list.files(source.folder, pattern = pattern)) {
+    #existing.file <- drive_ls(path = dest.folder, pattern = file)
+    if (file %in% uploaded.files$name) {
+      # If the file exists, update it, retaining sharing permissions, except for image files)
+      if (pattern != '.jpg|.png'){
+        drive_update(file = paste0(dest.folder,file),
+                     media = here(source.folder, file))}
+    } else {
+      # If the file doesn't exist, upload it
+      drive_upload(here(source.folder,file), path = dest.folder)
+      
+      # set sharing permissions
+      drive_share(paste0(dest.folder,file), role = "reader", type = "anyone")
+    }
+  }
+}
+
+
+
+#---------------------------------------------------------------------------------------
+
+
+#function for Kobo media download
+#depends on KobocollectR
+#need to edit for robotoolbox
+# kobo_media <- function (url = "kf.kobotoolbox.org", uname, pwd, assetid, fsep = ";", 
+#                         sleep = 2, identifier = "URL", timeoutval = 300, destfolder = "media") 
+# {
+#   dat <- kobo_df_download(url = url, uname = uname, pwd = pwd, 
+#                           assetid = assetid, lang = "_xml", sleep = sleep, 
+#                           fsep = fsep)
+#   if (!is.null(dat)) {
+#     cnamesdat <- colnames(dat)
+#     urlcols <- cnamesdat[grepl(paste0("*", identifier), cnamesdat)]
+#     options(timeout = max(timeoutval, getOption("timeout")))
+#     if (!file.exists(destfolder)) {
+#       dir.create(destfolder)
+#     }
+#     for (i in 1:nrow(dat)) {
+#       if (dat[,urlcols[1]][i] != ''){
+#         media.file <- content(GET(url = dat[,urlcols[1]][i], config = authenticate(user=uname,password=pwd)),
+#                               as='raw')
+#         writeBin(media.file,here(destfolder,paste0(dat$hh_id[i],
+#                                                    '_',
+#                                                    dat$livestock_species_final[i],#need to edit to make this more robust to different column names
+#                                                    '_',
+#                                                    dat$gps_logger_id_initial[i],
+#                                                    '.csv')))
+#       }
+#     }
+#     return(TRUE)
+#   }
+#   else {
+#     print("Data could not be downloaded. Please try again or check the parameters.")
+#     return(FALSE)
+#   }
+# }
+# 
 
 
 
@@ -196,16 +234,17 @@ add_daughter_samples <- function(data){
 #'   }
 #'   x
 #' }
+# 
 
-wkt_geoshape <- function(x) {
-  x <- strsplit(x, ";")
-  pattern <- "^(\\s*-?\\d+(?:\\.\\d+)?)\\s+(-?\\d+(?:\\.\\d+)?)\\s+(-?\\d+(?:\\.\\d+)?)(\\s+-?\\d+(?:\\.\\d+)?)$"
-  replacement <- "\\2 \\1 \\3"
-  x <- lapply(x, \(s) gsub(pattern, replacement, s))
-  x <- vapply(x, \(s) paste0("POLYGON ((", paste0(s, collapse = ", "), "))"),
-              character(1))
-  x
-}
+# wkt_geoshape <- function(x) {
+#   x <- strsplit(x, ";")
+#   pattern <- "^(\\s*-?\\d+(?:\\.\\d+)?)\\s+(-?\\d+(?:\\.\\d+)?)\\s+(-?\\d+(?:\\.\\d+)?)(\\s+-?\\d+(?:\\.\\d+)?)$"
+#   replacement <- "\\2 \\1 \\3"
+#   x <- lapply(x, \(s) gsub(pattern, replacement, s))
+#   x <- vapply(x, \(s) paste0("POLYGON ((", paste0(s, collapse = ", "), "))"),
+#               character(1))
+#   x
+# }
 
 # separate_geoshape <- function(x, col) {
 #   lbl <- var_label(select(x, all_of(col)))
