@@ -16,7 +16,7 @@ tidy_barcodes <- function(data, identifier = c('_m','_manual')){
       for (i in 1:nrow(data)) {
         
         if (!is.na(data[paste0(col,id)][i,1]) & data[paste0(col,id)][i,1]!='' & is.na(data[col][i,1])){
-          data[paste0(col)][i,1] <- data[paste0(col,id)][i,1]
+          data[paste0(col)][i,1] <- str_to_upper(data[paste0(col,id)][i,1])
         }
       }
       data <- data %>% select(-paste0(col,id))
@@ -120,7 +120,7 @@ upload_to_google <- function(source.folder,dest.folder, pattern){
 
 
 
-#---------------------------------------------------------------------------------------
+#-end --------------------------------------------------------------------------------------
 
 
 #function for Kobo media download

@@ -167,6 +167,91 @@ for (j in c('DTRANK_wildlife_sampling','DTRANK_individual_human','DTRANK_individ
 
 #list2env(kobo.data,globalenv()) #only needed for testing- creates objects of all data in the global environment
 
+#### lab results ----
+lab.control <- read.csv(list.files(here('input','lab_controls'), full.names = T), na = '') %>%
+  slice(which(xPONENT == "Net MFI"):which(xPONENT == 'Count'))%>%
+  select(1:6) %>%
+  { colnames(.) <- .[2, ]; . } %>%
+  rename_with(~'RVFV', contains('RVFV')) %>%
+  rename_with(~'CCHFV', contains('CCHFV')) %>%
+  rename_with(~'TULI', contains('Tuli')) %>%
+  filter(!is.na(Location) & Location != 'DataType:' & Location != 'Location') %>%
+  group_by(Sample) %>%
+  #calculate mean results for duplicate samples
+  summarise(RVFV = mean(as.numeric(RVFV)),
+            CCHFV = mean(as.numeric(CCHFV)),
+            TULI = mean(as.numeric(TULI)))
+
+lab.results <- data.frame()
+lab.qc <- data.frame()
+
+for (i in 1:nrow(kobo.data$DTRANK_lab_results)) {
+  media.file <- content(GET(url = kobo.data$DTRANK_lab_results$download_url[i],
+                            config = authenticate(user=uname,password=pwd)),
+                        as='text', encoding = 'UTF-8') %>%
+    #parse to dataframe
+    read.table(text=., header = TRUE, fill = TRUE, sep = ",", na.strings = '')
+  
+  # extract plate details and add to lab_results dataframe
+  kobo.data$DTRANK_lab_results$serial.number[i] <- media.file %>% filter(Program == 'SN') %>% pull(xPONENT)
+  kobo.data$DTRANK_lab_results$batch[i] <- media.file %>% filter(Program == 'Batch') %>% pull(xPONENT)
+  kobo.data$DTRANK_lab_results$run.date[i] <- media.file %>% filter(Program == 'Date') %>% pull(xPONENT)
+  
+  
+  media.file <- media.file %>%
+    slice(which(xPONENT == "Net MFI"):which(xPONENT == 'Count')) %>%
+    select(1:6) %>%
+    { colnames(.) <- .[2, ]; . } %>%
+    rename_with(~'RVFV', contains('RVFV')) %>%
+    rename_with(~'CCHFV', contains('CCHFV')) %>%
+    rename_with(~'TULI', contains('TULI')) %>%
+    filter(!is.na(Location) & Location != 'DataType:' & Location != 'Location') #%>%
+  
+  #QC check controls
+  qc.test <- media.file %>% filter(Sample == 'NEG'| Sample == 'POS') %>% select(-'Location',-'Total Events') %>%
+    left_join(lab.control, by = 'Sample') %>%
+    rename_with(~str_replace_all(.,c('.x' = '.batch','.y'='.ref'))) %>%
+    mutate(RVFV.pass = RVFV.batch < RVFV.ref*1.2 & RVFV.batch > RVFV.ref*0.8,
+           CCHFV.pass = CCHFV.batch < CCHFV.ref*1.2 & CCHFV.batch > CCHFV.ref*0.8,
+           TULI.pass = TULI.batch < TULI.ref*1.2 & TULI.batch > TULI.ref*0.8,
+           serial.number = kobo.data$DTRANK_lab_results$serial.number[i],
+           batch = kobo.data$DTRANK_lab_results$batch[i],
+           run.date = kobo.data$DTRANK_lab_results$run.date[i]) %>%
+    select(serial.number,batch,run.date,sample = Sample, matches('RVFV'),matches('CCHFV'),matches('TULI'))
+  
+  # print results
+  kobo.data$DTRANK_lab_results$qualtiy.control[i] <- ifelse(any(qc.test == FALSE),'Fail','Pass')
+  
+  media.file <- media.file %>%
+    group_by(Sample) %>%
+    #calculate mean results for duplicate samples
+    summarise(RVFV.raw = mean(as.numeric(RVFV)),
+              CCHFV.raw = mean(as.numeric(CCHFV)),
+              TULI.raw = mean(as.numeric(TULI))) %>%
+    #calculate ratio of signal to noise & binary pos/neg
+    mutate(RVFV.ratio = RVFV.raw/RVFV.raw[Sample == 'NEG'],
+           RVFV.pos = ifelse(RVFV.ratio >20,1,0),
+           CCHFV.ratio = CCHFV.raw/CCHFV.raw[Sample == 'NEG'],
+           CCHFV.pos = ifelse(CCHFV.ratio >20,1,0),
+           TULI.ratio = TULI.raw/TULI.raw[Sample == 'NEG'],
+           TULI.pos = ifelse(TULI.ratio >20,1,0),
+    ) %>%
+    filter(Sample != 'POS' & Sample != 'NEG') %>%
+    select(sample = Sample, matches('RVFV'),matches('CCHFV'),matches('TULI'))
+  #combine results from different plates
+  if (i == 1){
+    lab.qc <- qc.test
+    lab.results <- media.file
+  } else {
+    lab.qc <- lab.qc %>% bind_rows(qc.test)
+    lab.results <- lab.results %>% bind_rows(media.file)
+  }
+}
+
+write.csv(lab.results, here('output','DTRANK_lab_results.csv'), row.names = F)
+write.csv(lab.qc, here('output','DTRANK_lab_quality_control.csv'), row.names = F)
+
+
 #### activity space mapping ----
 #sort spatial data in repeats into combined point and polygon objects
 #create empty lists for point and area data
@@ -232,10 +317,6 @@ st_write(areas,
          layer = 'activity_space_mapping_polygons',
          append = F)
 
-### mapping activity space mapping data for each community??????----
-
-
-
 #### GPS_vector data tidying ----
 #separate gps.vector data sections and save to a list
 gps.vector.data <- list()
@@ -262,6 +343,7 @@ for (section in unique(kobo.data$DTRANK_GPS_vector$collection)) {
       filter(collection == section)
   }
 }
+
 #combine initial and final collar data
 gps.vector.data$livestock <- full_join(gps.vector.data[['initial']],
                                        gps.vector.data[['final']],
@@ -278,10 +360,22 @@ gps.vector.data$livestock <- full_join(gps.vector.data[['initial']],
          download_url, mimetype,
          -'gps_tick_initial',-'gps_tick_final')
 
+# data quality check on GPS collar data
+if (sum(is.na(gps.vector.data$livestock$gps_logger_id))>1|anyNA(gps.vector.data$livestock$date_deployed)|sum(is.na(gps.vector.data$livestock$date_retrieved))>2) {# accounts for 1 entry (camel in DHH0100053) with ceres tag but no collar
+  print("There are errors in matching initial GPS deployment data to final GPS retrieval data. This could be due to duplicates, data not sent, or incorrect livestock species of collar ID entered on the forms.")
+  
+  print(paste('Entries in initial collar deployment data: ',nrow(gps.vector.data$initial)))
+  print(paste('Entries in final collar retrieval data: ',nrow(gps.vector.data$final)))
+  print(paste('NAs in gps_logger_id column: ',sum(is.na(gps.vector.data$livestock$gps_logger_id))))
+  print(paste('NAs in date_deployed column: ',sum(is.na(gps.vector.data$livestock$date_deployed))))
+  print(paste('NAs in date_retrieved column: ',sum(is.na(gps.vector.data$livestock$date_retrieved))))
+}
+
+# there will always be 1 NA in gps_logger_id and 2 NA in date_retrieved due to a ceres tag deployed without a collar (camel from DHH0100053) and a lost collar #4 from a sheep in DHH0100073
 
 #### download movement tracks ----
 ######livestock movement ----
-gps.livestock.data <- list()
+#gps.livestock.data <- list()
 for (i in 1:nrow(gps.vector.data$livestock)) {
   if (paste0(gps.vector.data$livestock$hh_id[i],'_',
              gps.vector.data$livestock$livestock_species[i],'_',
@@ -317,7 +411,7 @@ for (i in 1:nrow(gps.vector.data$livestock)) {
       #remove temporary folder
       unlink(temp)
       
-    } else {
+    } else { #csv files
       ##  #download media file
       media.file <- content(GET(url = gps.vector.data$livestock$download_url[i],
                                 config = authenticate(user=uname,password=pwd)),
@@ -326,10 +420,10 @@ for (i in 1:nrow(gps.vector.data$livestock)) {
         read.table(text=., header = TRUE, fill = TRUE, sep = ",")
     }
     
-    if (nrow(media.file)>0) {#DHH010038_sheep_7 - zip file
+    if (nrow(media.file)>0) {# do not save blank files
       
       #save to list for further cleaning
-      gps.livestock.data[[i]] <- media.file
+      #gps.livestock.data[[i]] <- media.file
       
       #export to folder
       write.csv(media.file,here('input','raw','spatial','livestock',paste0(gps.vector.data$livestock$hh_id[i],
@@ -346,7 +440,7 @@ for (i in 1:nrow(gps.vector.data$livestock)) {
 
 
 ######human movement ----
-gps.human.data <- list()
+#gps.human.data <- list()
 for (i in 1:nrow(gps.vector.data$human)) {
   if (paste0(gps.vector.data$human$hh_id[i],'_',
              gps.vector.data$human$collection[i],'_',
@@ -390,15 +484,15 @@ for (i in 1:nrow(gps.vector.data$human)) {
                                                                                     '.gpx')), layer = 'track_points') %>%
         mutate(lon = sf::st_coordinates(.)[,1],
                lat = sf::st_coordinates(.)[,2],
-               time = force_tz(time, tzone = "africa/nairobi")) %>%
-        select(Time = time, lat, lon, elevation = ele, satellites = sat, hdop)
+               date_time = force_tz(time, tzone = "africa/nairobi")) %>%
+        st_drop_geometry() %>%
+        select(date_time, lat, lon, elevation = ele, satellites = sat, hdop)
     }
     
     #save to list for further cleaning
-    gps.human.data[[i]] <- media.file
+    #gps.human.data[[i]] <- media.file
     
     #export to folder
-    #might need to edit this if files are sent to Kobo as .gpx
     write.csv(media.file,here('input','raw','spatial','human',paste0(gps.vector.data$human$hh_id[i],
                                                                      '_',
                                                                      gps.vector.data$human$collection[i],
@@ -416,6 +510,10 @@ for (i in 1:nrow(gps.vector.data$human)) {
 for (file in list.files(here('input','raw','spatial','livestock'), pattern = '.csv')) {
   gps.data <- read.csv(here('input','raw','spatial','livestock',file), na.strings = '') %>% 
     mutate(
+      ID = gsub('.csv','',file),.before = 'DATE',
+      HH_ID = str_split(file,'_')[[1]][1],
+      LIVESTOCK_SPECIES = str_split(file,'_')[[1]][2],
+      GPS_LOGGER_ID = as.double(gsub('.csv','',str_split(file,'_')[[1]][3])),
       #tidy date and time columns
       #TIME = strptime(TIME, format = "%H:%M:%S"),
       TIME = format(strptime(sprintf("%06d", TIME), format="%H%M%S"), format = "%H:%M:%S"),
@@ -424,11 +522,26 @@ for (file in list.files(here('input','raw','spatial','livestock'), pattern = '.c
       #remove N or S from latitude and make southern points negative
       LATITUDE.N.S = case_when(grepl('N', LATITUDE.N.S) ~ as.numeric(gsub('N','', LATITUDE.N.S)),
                                grepl('S', LATITUDE.N.S) ~ as.numeric(gsub('S','', LATITUDE.N.S)) *-1),
-
+      
       #remove E from longitude
       LONGITUDE.E.W = as.numeric(gsub('E','', LONGITUDE.E.W))
     ) %>%
-    st_as_sf(coords = c('LONGITUDE.E.W', 'LATITUDE.N.S'), crs = 4326) %>% 
+    select(-any_of(c('INDEX','TAG'))) %>%
+    rename_with(tolower)
+  
+  # create joined data file with all GPS points
+  
+  gps.vector.data$livestock.all.pts[[file]] <- gps.data
+  # 
+  # if (file == list.files(here('input','raw','spatial','livestock'), pattern = '.csv')[1]){
+  #   gps.vector.data$livestock.all.pts.combined <- gps.data
+  # } else {
+  #   gps.vector.data$livestock.all.pts.combined <- bind_rows(gps.vector.data$livestock.all.pts.combined, gps.data)
+  # }
+  
+  #collapse points into multipoint object
+  gps.data <- gps.data %>%
+    st_as_sf(coords = c('longitude.e.w', 'latitude.n.s'), crs = 4326) %>% 
     summarise(geometry = st_combine(geometry)) %>%
     st_cast('MULTIPOINT') %>%
     mutate(hh_id = str_split(file,'_')[[1]][1],
@@ -436,20 +549,46 @@ for (file in list.files(here('input','raw','spatial','livestock'), pattern = '.c
            gps_logger_id = as.double(gsub('.csv','',str_split(file,'_')[[1]][3])))
   
   if (file == list.files(here('input','raw','spatial','livestock'), pattern = '.csv')[1]){
-      gps.multipoints.livestock <- gps.data
+    gps.vector.data$livestock.multipoint <- gps.data
   } else {
-    gps.multipoints.livestock <- bind_rows(gps.multipoints.livestock, gps.data)
-      }
+    gps.vector.data$livestock.multipoint <- bind_rows(gps.vector.data$livestock.multipoint, gps.data)
+  }
 }
 
-gps.vector.data$livestock.sf <- left_join(gps.vector.data$livestock, gps.multipoints.livestock,
-                                          by = c('hh_id','livestock_species','gps_logger_id')) %>%
+#right join to multipoint data to remove entries with no GPS data file
+gps.vector.data$livestock.multipoint <- right_join(gps.vector.data$livestock, gps.vector.data$livestock.multipoint,
+                                           by = c('hh_id','livestock_species','gps_logger_id')) %>%
   st_as_sf()
+
+#write all livestock gps point dataset to csv
+write.csv(bind_rows(gps.vector.data$livestock.all.pts),
+          here('output','spatial','DTRANK_livestock_pts_all.csv'),
+          row.names = F, na = '')
+
+#save RDS file for spatial data analysis
+saveRDS(gps.vector.data$livestock.all.pts, file = here('output','spatial','DTRANK_livestock_pts_all.RDS'))
 
 ##### humans ----
 for (file in list.files(here('input','raw','spatial','human'), pattern = '.csv')) {
-  gps.data <- read.csv(here('input','raw','spatial','human',file), na.strings = '') %>% 
-
+  gps.data <- read.csv(here('input','raw','spatial','human',file), na.strings = '', row.names = NULL) %>% 
+    mutate(id = gsub('.csv','',file),.before = 'date_time',
+           hh_id = str_split(file,'_')[[1]][1],
+           gps_logger_id_human = as.double(gsub('.csv','',str_split(file,'_')[[1]][3])),
+           date = as.Date(date_time),
+           time = format(as.POSIXct(date_time), format="%H:%M:%S"))
+  
+  # create joined data file with all GPS points
+  
+  gps.vector.data$human.all.pts[[file]] <- gps.data
+  
+  # if (file == list.files(here('input','raw','spatial','livestock'), pattern = '.csv')[1]){
+  #   gps.vector.data$human.all.pts <- gps.data
+  # } else {
+  #   gps.vector.data$human.all.pts <- bind_rows(gps.vector.data$human.all.pts, gps.data)
+  # }
+  
+  #collapse points into multipoint object
+  gps.data <- gps.data %>%
     st_as_sf(coords = c('lon', 'lat'), crs = 4326) %>% 
     summarise(geometry = st_combine(geometry)) %>%
     st_cast('MULTIPOINT') %>%
@@ -457,16 +596,24 @@ for (file in list.files(here('input','raw','spatial','human'), pattern = '.csv')
            gps_logger_id_human = as.double(gsub('.csv','',str_split(file,'_')[[1]][3])))
   
   if (file == list.files(here('input','raw','spatial','human'), pattern = '.csv')[1]){
-    gps.multipoints.human <- gps.data
+    gps.vector.data$human.multipoint <- gps.data
   } else {
-    gps.multipoints.human <- bind_rows(gps.multipoints.human, gps.data)
+    gps.vector.data$human.multipoint <- bind_rows(gps.vector.data$human.multipoint, gps.data)
   }
 }
 
-gps.vector.data$human.sf <- left_join(gps.vector.data$human, gps.multipoints.human,
-                                          by = c('hh_id','gps_logger_id_human')) %>%
+#right join to drop any entries without GPS data
+gps.vector.data$human.multipoint <- right_join(gps.vector.data$human, gps.vector.data$human.multipoint,
+                                      by = c('hh_id','gps_logger_id_human')) %>%
   st_as_sf()
 
+#write all human gps point dataset to csv
+write.csv(bind_rows(gps.vector.data$human.all.pts),
+          here('output','spatial','DTRANK_human_pts_all.csv'),
+          row.names = F, na = '')
+
+#save RDS file for spatial data analysis
+saveRDS(gps.vector.data$human.all.pts, file = here('output','spatial','DTRANK_human_pts_all.RDS'))
 
 # save separate GPS & vector csv files
 write.csv(gps.vector.data$livestock, here('output','DTRANK_livestock_GPS_vector.csv'), row.names = F, na = '')
@@ -474,11 +621,11 @@ write.csv(gps.vector.data$human, here('output','DTRANK_human_GPS.csv'), row.name
 write.csv(gps.vector.data$environment, here('output','DTRANK_evironment_vector.csv'), row.names = F, na = '')
 
 # save human and livestock spatial files
-st_write(gps.vector.data$livestock.sf,
+st_write(gps.vector.data$livestock.multipoint,
          dsn = here('output','spatial','DTRANK_livestock_GPS_vector_multipoint.gpkg'),
          layer = 'livestock_GPS_vector_multipoint',
          append = F)
-st_write(gps.vector.data$human.sf,
+st_write(gps.vector.data$human.multipoint,
          dsn = here('output','spatial','DTRANK_human_GPS_multipoint.gpkg'),
          layer = 'human_GPS_multipoint',
          append = F)
@@ -619,6 +766,25 @@ upload_to_google(source.folder = here('output','images','wildlife'),
 
 ## testing -----
 
+
+## lab results code ####
+# box <- read.csv(here('input','Book2.csv'), na = '') %>% filter(!is.na(Aliquot))%>%
+#   mutate(
+#     Aliquot = str_to_upper(Aliquot),
+#     `Box.ID` = str_to_upper(`Box.ID`)
+#   ) %>%
+#   filter(Aliquot %in% rodents$secd_edta_1)
+# 
+# box2 <- readxl::read_xlsx(here('for sirimon.xlsx')) %>%
+#   mutate(
+#     Aliquot = str_to_upper(Aliquot),
+#     `Box ID` = str_to_upper(`Box ID`)
+#   ) %>%
+#   filter(Aliquot %in% rodents$secd_edta_1)
+# 
+# rodents <- DTRANK_wildlife_sampling %>% filter(secb_aclass == '1')
+# 
+# write.csv(box2, here('rodent_EDTA_positions.csv'), row.names = F)
 
 
 # #load packages

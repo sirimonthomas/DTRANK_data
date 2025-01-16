@@ -5,13 +5,14 @@
 #load packages
 library(pacman)
 p_load(tidyverse,
-       KoboconnectR,
+       #robotoolbox,
        here,
        sf,
-       httr,
-       amt,
+       #httr,
+       #amt,
        tmap,
-       tmaptools)
+       tmaptools,
+       ctmm)
 
 #import gps track csv files
 files <- list.files(here('input','raw','spatial','gps_collars'), full.names = T)
@@ -202,3 +203,22 @@ for (i in 1:length(gps)) {
   ############ NDVI images ###########
   
 } 
+
+
+# new code for GPS data####
+
+## Short term GPS trackers####
+
+livestock.track <- st_read(here('output','spatial','DTRANK_livestock_GPS_vector_multipoint.gpkg'))
+
+livestock.pts <- readRDS(here('output','spatial','DTRANK_livestock_pts_all.RDS'))
+human.pts <- readRDS(here('output','spatial','DTRANK_human_pts_all.RDS'))
+
+livestock
+
+
+
+
+
+
+## Long term ceres tags ####
