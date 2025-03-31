@@ -15,7 +15,7 @@ tidy_barcodes <- function(data, identifier = c('_m','_manual')){
     for (col in barcode.cols) {
       for (i in 1:nrow(data)) {
         
-        if (!is.na(data[paste0(col,id)][i,1]) & data[paste0(col,id)][i,1]!='' & is.na(data[col][i,1])){
+        if (!is.na(data[paste0(col,id)][i,1]) & data[paste0(col,id)][i,1]!='' & (is.na(data[col][i,1]) | !str_detect(data[col][i,1], "^[A-Za-z]"))){
           data[paste0(col)][i,1] <- str_to_upper(data[paste0(col,id)][i,1])
         }
       }
@@ -84,6 +84,67 @@ add_daughter_samples <- function(data){
                 select('sample', 'Serum_blood_parentID','Serum_blood_aliquot1','Serum_blood_aliquot2'),
               by = 'Serum_blood_parentID') %>%
     relocate(c('Serum_blood_aliquot1','Serum_blood_aliquot2'), .after = 'Serum_blood_parentID')
+}
+
+
+#function to calculate Food Consumption Score (FCS)
+calculate_fcs <- function(data){
+  #weights from WFP guidance on FCS
+  data <- data %>%
+    mutate(FCS = (FCSStap * 2) + 
+             (FCSPulse * 3) +
+             (FCSPr * 4) +
+             (FCSDairy * 4) + 
+             FCSVeg +
+             FCSFruit +
+             (FCSFat * 0.5) +
+             (FCSSugar * 0.5),
+           #Food Consumption Group using standard thresholds
+           FCSCat = case_when(
+             FCS <= 21 ~ 1,
+             between(FCS, 21.5, 35) ~ 2, 
+             FCS > 35 ~ 3),
+           ,after = FCSCond_SRf)
+}
+
+#function to calculate Water Insecurity (HWISE)
+
+calculate_hwise <- function(data){
+  data2 <- data %>%
+    mutate(across(contains('hwise'), ~ as.numeric(case_when(
+      as.character(.) == 'never' ~ 0,
+      as.character(.) == 'rarely' ~ 1,
+      as.character(.) == 'sometimes' ~ 2,
+      as.character(.) == 'always' ~ 3,
+      TRUE ~ as.numeric(as.character(.))
+    )))) %>%
+    rowwise() %>%
+    mutate(hwise = sum(c_across(starts_with('hwise')), na.rm = TRUE)) %>%
+    ungroup()
+}
+
+#function to check for duplicate codes
+check_duplicate_codes <- function(data1, column1, data2, column2) {
+  # Find duplicate codes
+  duplicate_codes <- intersect(data1[[column1]], data2[[column2]])
+  
+  if (length(duplicate_codes) > 0) {
+    # Extract rows containing duplicates
+    duplicates1 <- data1 %>% filter(!!sym(column1) %in% duplicate_codes)
+    duplicates2 <- data2 %>% filter(!!sym(column2) %in% duplicate_codes)
+    
+    # Print results
+    cat("The following codes are duplicated in both datasets:\n")
+    print(duplicate_codes)
+    
+    cat("\nRows from dataset 1 with duplicate", column1, "codes:\n")
+    print(duplicates1)
+    
+    cat("\nRows from dataset 2 with duplicate", column2, "codes:\n")
+    print(duplicates2)
+  } else {
+    cat("No duplicate codes found between the two datasets.\n")
+  }
 }
 
 #function to remove unnecessary columns
