@@ -251,9 +251,28 @@ sampled_indiv_pop_structure <- ggplot(kobo.data$DTRANK_individual_human %>%
        y = "Percent of population",
        fill = 'Gender',
        title = "Population Structure of Sampled Individuals")
-
 #save
 ggsave(here('output','graphics','sampled_individuals_population_structure.png'), sampled_indiv_pop_structure)
+
+#sampled pop structure by county
+sampled_indiv_pop_structure_county <- ggplot(kobo.data$DTRANK_individual_human %>%
+                                        group_by(county, gender, participant_age) %>%
+                                        summarise(n = n()) %>%
+                                        mutate(population = n/sum(n)*100), 
+                                      aes(x = participant_age, fill = gender,
+                                          y = ifelse(gender == "male",-population,population))) + 
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  scale_y_continuous(labels = abs) +
+  labs(x = "Age", 
+       y = "Percent of population",
+       fill = 'Gender',
+       title = "Population Structure of Sampled Individuals") +
+  facet_wrap(~county)
+
+#save
+ggsave(here('output','graphics','sampled_individuals_population_structure_by_county.png'), sampled_indiv_pop_structure_county)
+
 
 #livestock populations
 kobo.data$DTRANK_individual_livestock %>%
