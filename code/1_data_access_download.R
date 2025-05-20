@@ -50,7 +50,7 @@ for (i in 1:nrow(kobo.projects)) {
   if (kobo.projects$submissions[i]>0){#this excludes projects with no submission as they cause an error with the download
     data <- kobo_data(
       kobo.projects$uid[i],
-      all_versions = FALSE,
+      all_versions = kobo.projects$name[i] == 'DTRANK_HH_valuechain',
       #lang = 'xml',
       progress = TRUE
     ) 
@@ -76,6 +76,11 @@ for (i in 1:nrow(kobo.projects)) {
         participant_age = ifelse(is.na(participant_age),as.numeric(age),participant_age),
         participant_age = round(participant_age)) %>% 
         select(-c(dob, participant_dob, age))
+    }
+    
+    #HH_valuechain - calculate FCS and HWISE
+    if (kobo.projects$name[i] == 'DTRANK_HH_valuechain'){
+      data <- data %>% calculate_fcs() %>% calculate_hwise()
     }
     
     #store datasets in list
@@ -203,6 +208,71 @@ check_duplicate_codes(kobo.data$DTRANK_individual_human,'Serum_blood_aliquot2',k
 
 #list2env(kobo.data,globalenv()) #only needed for testing- creates objects of all data in the global environment
 
+#### summary stats & graphs ----
+#average household structure
+
+hh_pop_structure <- ggplot(kobo.data$DTRANK_HH_demography_livestock %>%
+         select(hh_num, starts_with('m_'), starts_with('f_'), hh_num_calc) %>%
+         pivot_longer(cols = c(starts_with('m_'), starts_with('f_')), names_to = 'age_class', values_to = 'number') %>%
+         group_by(age_class) %>%
+         summarise(number = mean(number)) %>%
+         mutate(gender = case_when(
+           str_starts(age_class, "m_") ~ "M",
+           str_starts(age_class, "f_") ~ "F"),
+         age_class = factor(str_remove_all(age_class,c('f_|m_')), levels = c('under_5','5_18','18_50','over_50'))), 
+       aes(x = age_class, fill = gender,
+                 y = ifelse(gender == "M",
+                            -number, number))) + 
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  scale_y_continuous(labels = abs) +
+  labs(
+    x = "Age", 
+    y = "Average number of individuals", 
+    fill = "Gender", 
+    title = "Average Household Population Structure"
+  )
+
+#save
+ggsave(here('output','graphics','household_population_structure.png'), hh_pop_structure)
+
+#sampled poulation structure
+
+sampled_indiv_pop_structure <- ggplot(kobo.data$DTRANK_individual_human %>%
+         group_by(gender, participant_age) %>%
+         summarise(n = n()) %>%
+         mutate(population = n/sum(n)*100), 
+       aes(x = participant_age, fill = gender,
+                 y = ifelse(gender == "male",-population,population))) + 
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  scale_y_continuous(labels = abs) +
+  labs(x = "Age", 
+       y = "Percent of population",
+       fill = 'Gender',
+       title = "Population Structure of Sampled Individuals")
+
+#save
+ggsave(here('output','graphics','sampled_individuals_population_structure.png'), sampled_indiv_pop_structure)
+
+#livestock populations
+kobo.data$DTRANK_individual_livestock %>%
+  group_by(livestock_species, sex) %>%
+  summarise(n = n())
+
+
+livestock_sex_counts <- ggplot(kobo.data$DTRANK_individual_livestock %>%
+         group_by(livestock_species, sex) %>%
+         summarise(n = n()), 
+       aes(x = livestock_species, y = n, fill = sex)) +
+  geom_col(position = "dodge") +
+  labs(title = "Livestock Species and Sex",
+       fill = 'Sex',
+       x = "Species",
+       y = "Count")
+
+#save
+ggsave(here('output','graphics','livestock_species_sex_counts.png'), livestock_sex_counts)
 
 
 #### lab results ----

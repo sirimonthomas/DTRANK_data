@@ -12,7 +12,8 @@ p_load(tidyverse,
        #amt,
        tmap,
        tmaptools,
-       ctmm)
+       ctmm,
+       move2)
 
 #import gps track csv files
 files <- list.files(here('input','raw','spatial','gps_collars'), full.names = T)
@@ -207,14 +208,17 @@ for (i in 1:length(gps)) {
 
 # new code for GPS data####
 
+#import GPS data and tidy for movebank upload####
 ## Short term GPS trackers####
 
 livestock.track <- st_read(here('output','spatial','DTRANK_livestock_GPS_vector_multipoint.gpkg'))
+human.track <- st_read(here('output','spatial','DTRANK_human_GPS_multipoint.gpkg'))
 
 livestock.pts <- readRDS(here('output','spatial','DTRANK_livestock_pts_all.RDS'))
 human.pts <- readRDS(here('output','spatial','DTRANK_human_pts_all.RDS'))
 
-livestock
+#create tracks from GPS points
+
 
 
 
@@ -222,3 +226,15 @@ livestock
 
 
 ## Long term ceres tags ####
+
+### NOT WORKING - possible encoding issue?
+gps.long <- read.csv(rev(list.files(here('input','raw','spatial','long_term'), full.names = T))[[1]])#, fileEncoding = 'latin1')
+
+
+
+
+
+
+
+
+

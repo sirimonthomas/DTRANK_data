@@ -115,11 +115,14 @@ calculate_hwise <- function(data){
       as.character(.) == 'never' ~ 0,
       as.character(.) == 'rarely' ~ 1,
       as.character(.) == 'sometimes' ~ 2,
+      as.character(.) == 'often' ~ 3,
       as.character(.) == 'always' ~ 3,
       TRUE ~ as.numeric(as.character(.))
     )))) %>%
     rowwise() %>%
-    mutate(hwise = sum(c_across(starts_with('hwise')), na.rm = TRUE)) %>%
+    mutate(hwise = if (all(is.na(c_across(starts_with('hwise'))))) NA_real_ else sum(c_across(starts_with('hwise')), na.rm = TRUE),
+           hwise_answer = if (is.na(hwise)) NA_integer_ else sum(!is.na(c_across(starts_with('hwise')))) -1,
+           .after = hwise_shame) %>% #-1 to remove counting the 'hwise' column just calculated
     ungroup()
 }
 
