@@ -153,9 +153,8 @@ check_duplicate_codes <- function(data1, column1, data2, column2) {
 #function to remove unnecessary columns
 tidy_strip_pii <- function(data) {
   data <- data %>% select(everything(),
-                          -any_of(c('start', 'end', 'dev_id', 'deprecatedID', 'rootUuid', 'uuid', 'instanceID')),
-                          -starts_with('_'),
-                          '_uuid')#, 
+                          -any_of(c('start', 'end', 'dev_id', 'deprecatedID', 'rootUuid', 'uuid', 'instanceID','_uuid')),
+                          -starts_with('_'))#, 
 }
 
 

@@ -1,6 +1,13 @@
 library(pacman)
 p_load(terra, sf, tidyverse, tidyterra, here, RColorBrewer)
 
+library(terra)
+library(sf)
+library(tidyverse)
+library(tidyterra)
+library(here)
+library(RColorBrewer)
+
 ke.rain <- rast('C:/Users/s1512187/Downloads/ke_totann/ke_totann/ke_totann/w001001.adf')
 
 plot(ke.rain,1, breaks = c(0,250,600,800,1000,1300,1600,1900,2200,2500,2800))

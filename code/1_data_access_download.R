@@ -2,6 +2,7 @@
 # Sirimon Thomas
 # April 2024
 
+####setup----
 #need the development version of robotoolbox
 #remotes::install_gitlab("dickoa/robotoolbox")
 
@@ -23,7 +24,7 @@ source(here('code','0_functions.R'))
 uname <-  "dtrank_master"
 pwd <-  "M!tchbc13579"
 url <-  "kf.kobotoolbox.org"
-####setup----
+
 #for robotoolbox package
 kobo_setup(url = "https://kf.kobotoolbox.org/",
            token = "1123cf35535bde15c4452187ba990a616dc492c0")
@@ -47,7 +48,10 @@ kobo.data <- list()
 
 for (i in 1:nrow(kobo.projects)) {
   print(paste(as.character(i),':',kobo.projects$name[i]))
-  if (kobo.projects$submissions[i]>0){#this excludes projects with no submission as they cause an error with the download
+  #exclude projects with no submission and datasets that are specific to Dickson
+  if (kobo.projects$submissions[i]>0 &
+      kobo.projects$name[i] != 'DTRANK_extension_service_providers' &
+      kobo.projects$name[i] != 'DTRANK_input_suppliers'){
     data <- kobo_data(
       kobo.projects$uid[i],
       all_versions = kobo.projects$name[i] == 'DTRANK_HH_valuechain',
@@ -123,6 +127,27 @@ for (j in c('DTRANK_wildlife_sampling','DTRANK_individual_human','DTRANK_individ
             row.names = F,
             na = '')
 } 
+
+#create community ID reference data
+write.csv(kobo.data$DTRANK_HH_demography_livestock %>%
+            arrange(ward, date) %>%
+            group_by(ward) %>%
+            mutate(
+              day_diff = as.numeric(difftime(as_date(date), lag(as_date(date)), units = "days")),
+              session_break = ifelse(is.na(day_diff) | day_diff > 1, 1, 0),
+              session_id = cumsum(session_break),
+              session_multi = max(session_id)
+            ) %>%
+            ungroup() %>%
+            mutate(
+              community = ifelse(session_multi > 1,
+                                 paste(ward, as.character(session_id), sep = '_'),
+                                 ward)) %>%
+            select(date, county, ward, community, hh_id) %>%
+            arrange(date, hh_id),
+          here('output','community_household_id_reference.csv'),
+          row.names = F,
+          na = '')
 
 #### data quality checks ----
 # check for data entry errors
@@ -206,23 +231,40 @@ check_duplicate_codes(kobo.data$DTRANK_individual_livestock,'Serum_blood_aliquot
 check_duplicate_codes(kobo.data$DTRANK_individual_human,'Serum_blood_aliquot2',kobo.data$DTRANK_wildlife_sampling,'Serum_blood_aliquot2')
 
 
+## check for duplicated HH IDs##
+
+for (data in c("DTRANK_HH_demography_livestock","DTRANK_HH_valuechain")) {
+  if(TRUE %in% duplicated(kobo.data[[data]]$hh_id)){
+    print(paste('There are duplicated HH IDs in ',data))
+    print('The following HH IDs are duplicated:')
+    print(kobo.data[[data]]$hh_id[duplicated(kobo.data[[data]]$hh_id)])
+  }
+}
+
+## HH IDs missing from datasets
+
+#in valuechain but missing from demography livestock
+kobo.data$DTRANK_HH_valuechain$hh_id[kobo.data$DTRANK_HH_valuechain$hh_id %!in% kobo.data$DTRANK_HH_demography_livestock$hh_id]
+#in demography livestock but missing from valuechain
+kobo.data$DTRANK_HH_demography_livestock$hh_id[kobo.data$DTRANK_HH_demography_livestock$hh_id %!in% kobo.data$DTRANK_HH_valuechain$hh_id]
+
 #list2env(kobo.data,globalenv()) #only needed for testing- creates objects of all data in the global environment
 
 #### summary stats & graphs ----
 #average household structure
 
 hh_pop_structure <- ggplot(kobo.data$DTRANK_HH_demography_livestock %>%
-         select(hh_num, starts_with('m_'), starts_with('f_'), hh_num_calc) %>%
-         pivot_longer(cols = c(starts_with('m_'), starts_with('f_')), names_to = 'age_class', values_to = 'number') %>%
-         group_by(age_class) %>%
-         summarise(number = mean(number)) %>%
-         mutate(gender = case_when(
-           str_starts(age_class, "m_") ~ "M",
-           str_starts(age_class, "f_") ~ "F"),
-         age_class = factor(str_remove_all(age_class,c('f_|m_')), levels = c('under_5','5_18','18_50','over_50'))), 
-       aes(x = age_class, fill = gender,
-                 y = ifelse(gender == "M",
-                            -number, number))) + 
+                             select(hh_num, starts_with('m_'), starts_with('f_'), hh_num_calc) %>%
+                             pivot_longer(cols = c(starts_with('m_'), starts_with('f_')), names_to = 'age_class', values_to = 'number') %>%
+                             group_by(age_class) %>%
+                             summarise(number = mean(number)) %>%
+                             mutate(gender = case_when(
+                               str_starts(age_class, "m_") ~ "M",
+                               str_starts(age_class, "f_") ~ "F"),
+                               age_class = factor(str_remove_all(age_class,c('f_|m_')), levels = c('under_5','5_18','18_50','over_50'))), 
+                           aes(x = age_class, fill = gender,
+                               y = ifelse(gender == "M",
+                                          -number, number))) + 
   geom_bar(stat = "identity") +
   coord_flip() +
   scale_y_continuous(labels = abs) +
@@ -239,11 +281,11 @@ ggsave(here('output','graphics','household_population_structure.png'), hh_pop_st
 #sampled poulation structure
 
 sampled_indiv_pop_structure <- ggplot(kobo.data$DTRANK_individual_human %>%
-         group_by(gender, participant_age) %>%
-         summarise(n = n()) %>%
-         mutate(population = n/sum(n)*100), 
-       aes(x = participant_age, fill = gender,
-                 y = ifelse(gender == "male",-population,population))) + 
+                                        group_by(gender, participant_age) %>%
+                                        summarise(n = n()) %>%
+                                        mutate(population = n/sum(n)*100), 
+                                      aes(x = participant_age, fill = gender,
+                                          y = ifelse(gender == "male",-population,population))) + 
   geom_bar(stat = "identity") +
   coord_flip() +
   scale_y_continuous(labels = abs) +
@@ -256,11 +298,11 @@ ggsave(here('output','graphics','sampled_individuals_population_structure.png'),
 
 #sampled pop structure by county
 sampled_indiv_pop_structure_county <- ggplot(kobo.data$DTRANK_individual_human %>%
-                                        group_by(county, gender, participant_age) %>%
-                                        summarise(n = n()) %>%
-                                        mutate(population = n/sum(n)*100), 
-                                      aes(x = participant_age, fill = gender,
-                                          y = ifelse(gender == "male",-population,population))) + 
+                                               group_by(county, gender, participant_age) %>%
+                                               summarise(n = n()) %>%
+                                               mutate(population = n/sum(n)*100), 
+                                             aes(x = participant_age, fill = gender,
+                                                 y = ifelse(gender == "male",-population,population))) + 
   geom_bar(stat = "identity") +
   coord_flip() +
   scale_y_continuous(labels = abs) +
@@ -275,15 +317,10 @@ ggsave(here('output','graphics','sampled_individuals_population_structure_by_cou
 
 
 #livestock populations
-kobo.data$DTRANK_individual_livestock %>%
-  group_by(livestock_species, sex) %>%
-  summarise(n = n())
-
-
 livestock_sex_counts <- ggplot(kobo.data$DTRANK_individual_livestock %>%
-         group_by(livestock_species, sex) %>%
-         summarise(n = n()), 
-       aes(x = livestock_species, y = n, fill = sex)) +
+                                 group_by(livestock_species, sex) %>%
+                                 summarise(n = n()), 
+                               aes(x = livestock_species, y = n, fill = sex)) +
   geom_col(position = "dodge") +
   labs(title = "Livestock Species and Sex",
        fill = 'Sex',
@@ -310,9 +347,6 @@ lab$lab.control <- read.csv(list.files(here('input','lab_controls'), full.names 
   summarise(RVFV = mean(as.numeric(RVFV)),
             CCHFV = mean(as.numeric(CCHFV)),
             TULI = mean(as.numeric(TULI)))
-
-# lab.results <- data.frame()
-# lab.qc <- data.frame()
 
 for (i in 1:nrow(kobo.data$DTRANK_lab_results)) {
   
@@ -403,68 +437,115 @@ write.csv(lab$lab.qc, here('output','DTRANK_lab_quality_control.csv'), row.names
 #sort spatial data in repeats into combined point and polygon objects
 #create empty lists for point and area data
 activity.space.map <- list()
-#pts <- list()
-#area <- list()
-activity.space.map$main <- kobo.data$DTRANK_activity_space_mapping$main %>% tidy_strip_pii()
 
-for (type in names(kobo.data$DTRANK_activity_space_mapping)[2:length(kobo.data$DTRANK_activity_space_mapping)]) {
-  #note - for some reason when downloading from the server, some of the wrong columns are included in the repeat datasets
+#extract and tidy main table
+activity.space.map$main <- kobo.data$DTRANK_activity_space_mapping$main %>% 
+  tidy_barcodes() %>% 
+  #unnest attachment columns to be able to access urls
+  unnest_wider(`_attachments`) %>%
+  #attach HH GPS coordinates
+  left_join(kobo.data$DTRANK_HH_demography_livestock %>% 
+              select(county, 
+                     ward, 
+                     hh_id, 
+                     starts_with('gps_')), by = 'hh_id')
+#manually add gps coordinates for household which was missing data
+activity.space.map$main[8,c('county','ward','gps_latitude','gps_longitude','gps_altitude','gps_precision','gps_wkt')] <- list('samburu','ndoto',1.640515,37.38376,0,0,'POINT (37.38376 1.640515 0)')
+activity.space.map$main <- st_as_sf(activity.space.map$main,
+                                    wkt = 'gps_wkt', 
+                                    crs = 4326, 
+                                    remove = F)
+
+#write to gpkg
+st_write(activity.space.map$main %>% tidy_strip_pii(),
+         dsn = here('output','spatial','DTRANK_activity_space_mapping.gpkg'),
+         layer = 'main_household',
+         append = F)
+
+#add hh id to each child table and make spatial
+for (rep in dm_get_all_fks(kobo.data$DTRANK_activity_space_mapping)$child_table) {
+  activity.space.map[[str_remove(rep,'_rep')]] <- kobo.data$DTRANK_activity_space_mapping[[rep]] %>%
+  left_join(activity.space.map$main %>%
+              st_drop_geometry() %>%
+              select('hh_id', '_index'),
+            by = c('_parent_index'='_index'),
+            relationship = 'many-to-many') %>%
+    mutate(location_type = str_remove(rep,'_rep')) %>%
+    tidy_strip_pii() %>%
+    st_as_sf(wkt = select(.,contains('wkt')) %>% colnames(), crs=4326, remove = F)
   
-  #points data
-  if (type %!in% c('grazing_rep','crops_rep')) {
-    activity.space.map$pts.raw[[type]] <- dm_flatten_to_tbl(kobo.data$DTRANK_activity_space_mapping,.start = !!as.name(type),.join=left_join) %>%
-      dplyr::mutate(
-        location_type = str_remove(type,'_rep')) %>%
-      select(-starts_with('_'), -contains(paste0('.',type)))
-    #change column names so row_binding will create a single column for repeated variables
-    names(activity.space.map$pts.raw[[type]]) <- str_remove_all(names(activity.space.map$pts.raw[[type]]),paste(paste0('_',str_remove_all(type,'_rep')),
-                                                                                                                paste0(str_remove_all(type,'_rep'),'_'),
-                                                                                                                '.main',
-                                                                                                                sep = '|'))
-    
-    #area/geoshape/polygon data
-  } else if (type %in% c('grazing_rep','crops_rep')) {
-    activity.space.map$areas.raw[[type]] <- dm_flatten_to_tbl(kobo.data$DTRANK_activity_space_mapping,.start = !!as.name(type),.join=left_join) %>%
-      dplyr::mutate(
-        location_type = str_remove(type,'_rep')) %>%
-      select(-starts_with('_'), -contains(paste0('.',type)))
-    #change column names so row_binding will create a single column for repeated variables
-    names(activity.space.map$areas.raw[[type]]) <- str_remove_all(names(activity.space.map$areas.raw[[type]]),paste(paste0('_',str_remove_all(type,'_rep')),
-                                                                                                                    paste0(str_remove_all(type,'_rep'),'_'),
-                                                                                                                    '.main',
-                                                                                                                    sep = '|'))
-  }
+  #write to gpkg
+st_write(activity.space.map[[str_remove(rep,'_rep')]],
+             dsn = here('output','spatial','DTRANK_activity_space_mapping.gpkg'),
+             layer = str_remove(rep,'_rep'),
+             append = F)
 }
 
-#combine points data and create spatial object
-activity.space.map$points <- bind_rows(activity.space.map$pts.raw) %>%
-  select(location_type, hh_id,date,
-         everything(),
-         -contains(c('yn','action_taken_','_count','_rep_count','action_taken.')),
-         -c(start,end,dev_id,uuid,instanceID),
-         'waterpoint_type'='type','water_use_livestock_human'='livestock_human') %>%
-  tidy_barcodes() %>%
-  st_as_sf(wkt = 'gps_wkt', crs = 'epsg:4326', remove = F)
-#write to gpkg
-st_write(activity.space.map$points,
-         dsn = here('output','spatial','DTRANK_activity_space_mapping.gpkg'),
-         layer = 'activity_space_mapping_points',
-         append = F)
+#strip pii and tidy main activity space map
+activity.space.map$main <- activity.space.map$main %>% tidy_strip_pii()
 
-#combine polygon data and create spatial object
-activity.space.map$areas <- bind_rows(activity.space.map$areas.raw) %>%
-  select(location_type, hh_id,date,
-         everything(),
-         -contains(c('yn','action_taken_','_count','_rep_count')),
-         -c(start,end,dev_id,uuid,instanceID),
-         'geometry' = 'gps_area_wkt') %>%
-  tidy_barcodes() %>%
-  st_as_sf(wkt = 'geometry', crs='epsg:4326')
-#write to gpkg
-st_write(activity.space.map$areas,
-         dsn = here('output','spatial','DTRANK_activity_space_mapping.gpkg'),
-         layer = 'activity_space_mapping_polygons',
-         append = F)
+#save RDS file for spatial data analysis
+saveRDS(activity.space.map, file = here('output','spatial','DTRANK_activity_space_mapping.RDS'))
+
+
+# for (type in names(kobo.data$DTRANK_activity_space_mapping)[2:length(kobo.data$DTRANK_activity_space_mapping)]) {
+#   #note - for some reason when downloading from the server, some of the wrong columns are included in the repeat datasets
+#   
+#   #points data
+#   if (type %!in% c('grazing_rep','crops_rep')) {
+#     activity.space.map$pts.raw[[type]] <- dm_flatten_to_tbl(kobo.data$DTRANK_activity_space_mapping,.start = !!as.name(type),.join=left_join) %>%
+#       dplyr::mutate(
+#         location_type = str_remove(type,'_rep')) %>%
+#       select(-starts_with('_'), -contains(paste0('.',type)))
+#     #change column names so row_binding will create a single column for repeated variables
+#     names(activity.space.map$pts.raw[[type]]) <- str_remove_all(names(activity.space.map$pts.raw[[type]]),paste(paste0('_',str_remove_all(type,'_rep')),
+#                                                                                                                 paste0(str_remove_all(type,'_rep'),'_'),
+#                                                                                                                 '.main',
+#                                                                                                                 sep = '|'))
+#     
+#     #area/geoshape/polygon data
+#   } else if (type %in% c('grazing_rep','crops_rep')) {
+#     activity.space.map$areas.raw[[type]] <- dm_flatten_to_tbl(kobo.data$DTRANK_activity_space_mapping,.start = !!as.name(type),.join=left_join) %>%
+#       dplyr::mutate(
+#         location_type = str_remove(type,'_rep')) %>%
+#       select(-starts_with('_'), -contains(paste0('.',type)))
+#     #change column names so row_binding will create a single column for repeated variables
+#     names(activity.space.map$areas.raw[[type]]) <- str_remove_all(names(activity.space.map$areas.raw[[type]]),paste(paste0('_',str_remove_all(type,'_rep')),
+#                                                                                                                     paste0(str_remove_all(type,'_rep'),'_'),
+#                                                                                                                     '.main',
+#                                                                                                                     sep = '|'))
+#   }
+# }
+# 
+# #combine points data and create spatial object
+# activity.space.map$points <- bind_rows(activity.space.map$pts.raw) %>%
+#   select(location_type, hh_id,date,
+#          everything(),
+#          -contains(c('yn','action_taken_','_count','_rep_count','action_taken.')),
+#          -c(start,end,dev_id,uuid,instanceID),
+#          'waterpoint_type'='type','water_use_livestock_human'='livestock_human') %>%
+#   tidy_barcodes() %>%
+#   st_as_sf(wkt = 'gps_wkt', crs = 'epsg:4326', remove = F)
+# #write to gpkg
+# st_write(activity.space.map$points,
+#          dsn = here('output','spatial','DTRANK_activity_space_mapping.gpkg'),
+#          layer = 'activity_space_mapping_points',
+#          append = F)
+# 
+# #combine polygon data and create spatial object
+# activity.space.map$areas <- bind_rows(activity.space.map$areas.raw) %>%
+#   select(location_type, hh_id,date,
+#          everything(),
+#          -contains(c('yn','action_taken_','_count','_rep_count')),
+#          -c(start,end,dev_id,uuid,instanceID),
+#          'geometry' = 'gps_area_wkt') %>%
+#   tidy_barcodes() %>%
+#   st_as_sf(wkt = 'geometry', crs='epsg:4326')
+# #write to gpkg
+# st_write(activity.space.map$areas,
+#          dsn = here('output','spatial','DTRANK_activity_space_mapping.gpkg'),
+#          layer = 'activity_space_mapping_polygons',
+#          append = F)
 
 #### GPS_vector data tidying ----
 #separate gps.vector data sections and save to a list
@@ -515,7 +596,7 @@ gps.vector.data$livestock <- full_join(gps.vector.data[['initial']],
          -'gps_tick_initial',-'gps_tick_final')
 
 # data quality check on GPS collar data
-if (sum(is.na(gps.vector.data$livestock$gps_logger_id))>1|anyNA(gps.vector.data$livestock$date_deployed)|sum(is.na(gps.vector.data$livestock$date_retrieved))>2) {# accounts for 1 entry (camel in DHH0100053) with ceres tag but no collar
+if (sum(is.na(gps.vector.data$livestock$gps_logger_id))>1|anyNA(gps.vector.data$livestock$date_deployed)|sum(is.na(gps.vector.data$livestock$date_retrieved))>3) {# accounts for 1 entry (camel in DHH0100053) with ceres tag but no collar
   print("There are errors in matching initial GPS deployment data to final GPS retrieval data. This could be due to duplicates, data not sent, or incorrect livestock species or collar ID entered on the forms.")
   
   print(paste('Entries in initial collar deployment data: ',nrow(gps.vector.data$initial)))
@@ -525,7 +606,10 @@ if (sum(is.na(gps.vector.data$livestock$gps_logger_id))>1|anyNA(gps.vector.data$
   print(paste('NAs in date_retrieved column: ',sum(is.na(gps.vector.data$livestock$date_retrieved))))
 }
 
-# there will always be 1 NA in gps_logger_id and 2 NA in date_retrieved due to a ceres tag deployed without a collar (camel from DHH0100053) and a lost collar #4 from a sheep in DHH0100073
+# there will always be 1 NA in gps_logger_id and 3 NA in date_retrieved due to:
+#a ceres tag deployed without a collar (camel from DHH0100053)
+#a lost collar #4 from a sheep in DHH0100073
+#a lost collar #1 from a goat in DHH010175
 
 #### download movement tracks ----
 ######livestock movement ----
@@ -605,43 +689,53 @@ for (i in 1:nrow(gps.vector.data$human)) {
   {
     #download media file
     if (gps.vector.data$human$mimetype[i] == 'text/comma-separated-values'){#.csv files
+      
+      
       media.file <- content(GET(url = gps.vector.data$human$download_url[i],
                                 config = authenticate(user=uname,password=pwd)),
                             as='text', encoding = 'UTF-8') %>% 
         #parse to dataframe
-        read.table(text=., header = TRUE, fill = TRUE, sep = ",") %>%
-        mutate(Time = as_datetime(str_remove_all(Time,'"|='), tz = "africa/nairobi"),
-               Altitude.m. = ifelse(TRUE %in% str_detect(names(.),'Altitude.ft.'), .$Altitude.ft.,.$Altitude.m.)) %>%
-        select(date_time = Time, lat = Latitude, lon = Longitude, elevation = Altitude.m.,satellites = Satellites.CN.22.,hdop = HDOP)
+        read.table(text=., header = TRUE, fill = TRUE, sep = ",")
       
+      if ('Latitude' %in% names(media.file)) {
+        media.file <- media.file %>%
+          mutate(Time = as_datetime(str_remove_all(Time,'"|='), tz = "africa/nairobi"),
+                 Altitude.m. = ifelse(TRUE %in% str_detect(names(.),'Altitude.ft.'), .$Altitude.ft.,.$Altitude.m.)) %>%
+          select(date_time = Time, lat = Latitude, lon = Longitude, elevation = Altitude.m.,satellites = Satellites.CN.22.,hdop = HDOP)
+      } else {
+        # for csv files converted to csv from gpx in QGIS
+        media.file <- media.file %>%
+          mutate(date_time = as_datetime(time, tz = "africa/nairobi")) %>%
+          select(date_time, lat = X, lon = Y, elevation = ele, satellites = sat, hdop)
+      }
     } else if (gps.vector.data$human$mimetype[i] == 'application/octet-stream'){
+      
+      file_path <- here('input','raw','spatial','human','gpx_files',paste0(gps.vector.data$human$hh_id[i],
+                                                                           '_',
+                                                                           gps.vector.data$human$collection[i],
+                                                                           '_',
+                                                                           gps.vector.data$human$gps_logger_id_human[i],
+                                                                           '.gpx'))
+      #download
       content(GET(url = gps.vector.data$human$download_url[i],
                   config = authenticate(user=uname,password=pwd)),
               as='raw') %>% 
         
         #write .gpx files
-        writeBin(here('input','raw','spatial','human','gpx_files',paste0(gps.vector.data$human$hh_id[i],
-                                                                         '_',
-                                                                         gps.vector.data$human$collection[i],
-                                                                         '_',
-                                                                         gps.vector.data$human$gps_logger_id_human[i],
-                                                                         '.gpx')))
+        writeBin(file_path)
       #read from written .gpx file
-      media.file <- st_read(here('input','raw','spatial','human','gpx_files',paste0(gps.vector.data$human$hh_id[i],
-                                                                                    '_',
-                                                                                    gps.vector.data$human$collection[i],
-                                                                                    '_',
-                                                                                    gps.vector.data$human$gps_logger_id_human[i],
-                                                                                    '.gpx')), layer = 'track_points') %>%
+      if (st_layers(file_path)$features[1]>0) {
+        
+      }
+      
+      #some gpx files had to be convered in QGIS and output the data to the 'waypoints' layer, instead of the 'track_points' layer  
+      media.file <- st_read(file_path, layer = ifelse(st_layers(file_path)$features[1]>0,'waypoints','track_points')) %>%
         mutate(lon = sf::st_coordinates(.)[,1],
                lat = sf::st_coordinates(.)[,2],
                date_time = force_tz(time, tzone = "africa/nairobi")) %>%
         st_drop_geometry() %>%
         select(date_time, lat, lon, elevation = ele, satellites = sat, hdop)
     }
-    
-    #save to list for further cleaning
-    #gps.human.data[[i]] <- media.file
     
     #export to folder
     write.csv(media.file,here('input','raw','spatial','human',paste0(gps.vector.data$human$hh_id[i],
@@ -945,20 +1039,20 @@ cryobox$vector <- left_join(gps.vector.data$livestock %>%
                                 values_to = "vector_sample_id"
                               ) %>%
                               bind_cols(vector_count = gps.vector.data$livestock %>%
-                                       pivot_longer(
-                                         cols = names(.)[which(names(.) %in% grep("_sample_id$", names(.), value = TRUE)) - 1],  
-                                         #cols = all_of(names(.)[match(all_of(grep("sample_id$", names(.), value = TRUE)), names(.)) - 1]),
-                                         names_to = "vector_sample",
-                                         values_to = "vector_count"
-                                       ) %>% select(vector_count)) %>%
+                                          pivot_longer(
+                                            cols = names(.)[which(names(.) %in% grep("_sample_id$", names(.), value = TRUE)) - 1],  
+                                            #cols = all_of(names(.)[match(all_of(grep("sample_id$", names(.), value = TRUE)), names(.)) - 1]),
+                                            names_to = "vector_sample",
+                                            values_to = "vector_count"
+                                          ) %>% select(vector_count)) %>%
                               select(hh_id,species = livestock_species,serum_parent = vector_sample,aliquot = vector_sample_id,vector_count) %>%
                               mutate(aliquot_type = 'vector'),
-                              cryobox$all_samples,
-                              by = 'aliquot') %>%
+                            cryobox$all_samples,
+                            by = 'aliquot') %>%
   bind_rows(left_join(
     gps.vector.data$environment %>%
-              select(hh_id,aliquot=tick_env_sample_id,vector_count=tick_env_count,notes=tick_env_notes) %>%
-              mutate(aliquot_type = 'vector_environment'),
+      select(hh_id,aliquot=tick_env_sample_id,vector_count=tick_env_count,notes=tick_env_notes) %>%
+      mutate(aliquot_type = 'vector_environment'),
     cryobox$all_samples %>% select(-notes),
     by = 'aliquot')) %>%
   filter(!is.na(aliquot))
@@ -1056,8 +1150,8 @@ sample.sum <- bind_rows(human,
                           mutate(ID = "Wildlife Total")) %>%
   select(Species = ID,
          `Blood Samples` = blood.samples,
-         `GPS Trackers/Collars` = GPS.tracks,
-         `GPS Ear Tags` = Ceres.tags,
+         `Short term GPS Tracks` = GPS.tracks,
+         `Long term GPS Ear Tags` = Ceres.tags,
          everything()) %>%
   mutate(Species = str_to_title(Species))
 write.csv(sample.sum, here('output','DTRANK_sample_summary.csv'), row.names = F, na='')

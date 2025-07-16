@@ -2,6 +2,7 @@
 # Sirimon Thomas
 # April 2024
 
+###setup ----
 #load packages
 library(pacman)
 p_load(tidyverse,
@@ -10,10 +11,12 @@ p_load(tidyverse,
        sf,
        #httr,
        #amt,
-       tmap,
-       tmaptools,
+       #tmap,
+       #tmaptools,
        ctmm,
-       move2)
+       move2,
+       units,
+       leaflet)
 
 #import gps track csv files
 files <- list.files(here('input','raw','spatial','gps_collars'), full.names = T)
@@ -42,7 +45,7 @@ gps.summary <- data.frame()
 #sf_use_s2(FALSE)
 
 for (i in 1:length(gps)) {
-  #### data cleaning & spatial analysis ####
+  #### data cleaning & spatial analysis #
   
   #gps[[i]] <- gps[[i]][!is.na(gps[[i]]$LONGITUDE.E.W),] #remove nas
   
@@ -57,8 +60,8 @@ for (i in 1:length(gps)) {
     DATETIME = as.POSIXlt(paste(DATE, TIME), format = "%Y-%m-%d %H:%M:%S"),
     #remove N or S from latitude and make southern points negative
     LATITUDE.N.S = ifelse(substr(LATITUDE.N.S,10,10) == "N",
-                           as.numeric(substr(LATITUDE.N.S,1,9)),
-                           as.numeric(substr(LATITUDE.N.S,1,9))*-1) 
+                          as.numeric(substr(LATITUDE.N.S,1,9)),
+                          as.numeric(substr(LATITUDE.N.S,1,9))*-1) 
   )
   
   #remove points within 20m of boma to accomodate GPS variability
@@ -79,14 +82,14 @@ for (i in 1:length(gps)) {
   
   #reset row indeces & INDEX values
   if(nrow(gps[[i]])>0){
-  row.names(gps[[i]]) <- NULL
-  gps[[i]]$INDEX <- seq(1:nrow(gps[[i]]))
+    row.names(gps[[i]]) <- NULL
+    gps[[i]]$INDEX <- seq(1:nrow(gps[[i]]))
   }
-
+  
   
   #}  
   
-  #### GIS analysis ####
+  #### GIS analysis #
   
   #create tracks for amt package
   mk.track[[i]] <- mk_track(tbl = gps[[i]], .x = LONGITUDE.E.W, .y = LATITUDE.N.S, .t = DATETIME, crs = 4326, all_cols = T)
@@ -119,7 +122,7 @@ for (i in 1:length(gps)) {
   gps.summary$hr.mcp.50.m2[i] <- hr_area(mcp.50[[i]])$area
   gps.summary$hr.mcp.95.m2[i] <- hr_area(mcp.95[[i]])$area
   
-  #### movement calculations ####
+  #### movement calculations #
   
   #claculate length of the track
   gps.summary$dist.m[i] <- st_length(as_sf_lines(mk.track[[i]]))
@@ -130,7 +133,7 @@ for (i in 1:length(gps)) {
   #calculate speed
   gps.summary$speed.kmh[i] <- (gps.summary$dist.m[i]/1000)/gps.summary$time.h[i]
   
-  # #### NDVI ####
+  # #### NDVI ##
   # 
   # #import lansat rasters
   # lansat.red <- raster("C:/Users/sirim/Downloads/LC09_L2SP_168060_20220711_20220713_02_T1_SR_B4.TIF")
@@ -162,7 +165,7 @@ for (i in 1:length(gps)) {
   # #plot(pts$geometry, add = T)
   
   
-  #### mapping & image export ####
+  #### mapping & image export #
   
   tm <- tm_shape(kde.95[[i]]$ud$lyr.1) +
     tm_raster(palette = "BuPu", colorNA = "white", n = 20, legend.show = F) +
@@ -173,10 +176,10 @@ for (i in 1:length(gps)) {
     tm_layout(title = paste("Home Range - ",gps.summary$ID[i]), asp = 1, frame = T) +
     tm_scale_bar(position = c("left", "bottom")) +
     tm_compass(position = c("right", "bottom"))
-
+  
   #save the file
   tmap_save(tm, filename = here('output','spatial',paste0(gps.summary$ID[i],'_all.jpg')))
-
+  
   #mapping & image export
   tm.mcp <- tm_shape(kde.95[[i]]$ud$lyr.1) +
     tm_raster(palette = "BuPu", colorNA = "white", n = 20, legend.show = F) +
@@ -184,10 +187,10 @@ for (i in 1:length(gps)) {
     tm_shape(mcp.50[[i]]$mcp) + tm_borders(col = "Red", lty = "dashed") +
     tm_layout(title = paste("Home Range Minimum Convex Polygons - ",gps.summary$ID[i]), asp = 1, frame = T) +
     tm_scale_bar(position = c("left", "bottom"))
-
+  
   #save the file
   tmap_save(tm.mcp, filename = here('output','spatial',paste0(gps.summary$ID[i],'_MCP.jpg')))
-
+  
   #mapping & image export
   tm.kde <- tm_shape(kde.95[[i]]$ud$lyr.1) +
     tm_raster(palette = "BuPu", colorNA = "white", n = 20, legend.show = F) +
@@ -195,13 +198,12 @@ for (i in 1:length(gps)) {
     tm_shape(iso.50[[i]]) + tm_borders(col = "blue", lty = "dashed") +
     tm_layout(title = paste("Home Range by Kernel Density Estimation - ",gps.summary$ID[i]), asp = 1, frame = T) +
     tm_scale_bar(position = c("left", "bottom"))
-
+  
   #save the file
   tmap_save(tm.kde, filename = here('output','spatial',paste0(gps.summary$ID[i],'_KDE.jpg')))
-
   
   
-  ############ NDVI images ###########
+  ######### NDVI
   
 } 
 
@@ -209,7 +211,7 @@ for (i in 1:length(gps)) {
 # new code for GPS data####
 
 #import GPS data and tidy for movebank upload####
-## Short term GPS trackers####
+##short term GPS trackers----
 
 livestock.track <- st_read(here('output','spatial','DTRANK_livestock_GPS_vector_multipoint.gpkg'))
 human.track <- st_read(here('output','spatial','DTRANK_human_GPS_multipoint.gpkg'))
@@ -219,22 +221,76 @@ human.pts <- readRDS(here('output','spatial','DTRANK_human_pts_all.RDS'))
 
 #create tracks from GPS points
 
+##activity space mapping data----
+particip.map <- st_read(here('output','spatial','DTRANK_activity_space_mapping.gpkg'))
+
+##household gps points----
+
+####human----
+#test on single human record
+data <- human.pts[[1]]
+data.mt <- data %>% 
+  mutate(date_time = as_datetime(date_time)) %>%
+  mt_as_move2(coords = c('lon','lat'), crs = 4326, 
+              time_column = 'date_time', 
+              track_id_column = 'id',
+              track_attributes = c('hh_id','gps_logger_id_human')) %>%
+  mutate(azimuth = mt_azimuth(.),
+         turn_angle = mt_turnangle(.),
+         distance = mt_distance(., units = as_units('m')),
+         time_lag = mt_time_lags(.))
+
+## all tracks as same table
+data.mt <- bind_rows(human.pts) %>% 
+  mutate(date_time = as_datetime(date_time)) %>%
+  mt_as_move2(coords = c('lon','lat'), crs = 4326, 
+              time_column = 'date_time', 
+              track_id_column = 'id',
+              track_attributes = c('hh_id','gps_logger_id_human')) %>%
+  mutate(azimuth = mt_azimuth(.),
+         turn_angle = mt_turnangle(.),
+         distance = mt_distance(., units = as_units('m')),
+         time_lag = mt_time_lags(.))
+
+mt_n_tracks(data.mt)
+hist(data.mt$time_lag)
+
+#only track level data
+mt_track_data(data.mt)
+
+#make line object from points
+mt_track_lines(data.mt)
+
+#autocorellation function acf()
+acf(data.mt$azimuth)
+
+for (i in 1:length(human.pts)) {
+  
+}
+
+####livestock----
 
 
 
 
 
-
-## Long term ceres tags ####
+##long term ceres tags----
 
 ### NOT WORKING - possible encoding issue?
 gps.long <- read.csv(rev(list.files(here('input','raw','spatial','long_term'), full.names = T))[[1]])#, fileEncoding = 'latin1')
 
 
+##community maps----
+community.id <- read.csv(here('output','community_household_id_reference.csv'))
+st_layers(here('output','spatial','DTRANK_activity_space_mapping.gpkg'))
+space.map.pts <- st_read(here('output','spatial','DTRANK_activity_space_mapping.gpkg'), layer = 'activity_space_mapping_points')# %>%
+  left_join(select(community.id,-date), by = 'hh_id')
+space.map.poly <- st_read(here('output','spatial','DTRANK_activity_space_mapping.gpkg'), layer = 'activity_space_mapping_polygons')# %>%
+  left_join(select(community.id,-date), by = 'hh_id')
 
 
 
-
+##interactive map----
 
 
 

@@ -1,0 +1,406 @@
+---
+title: "DTRA-NK Summary and Maps"
+author: "Sirimon Thomas"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+#load packages
+library(pacman)
+p_load(tidyverse,
+       KoboconnectR,
+       here,
+       sf,
+       httr,
+       #amt,
+       #tmap,
+       #tmaptools,
+       knitr,
+       kableExtra,
+       terra,
+       #tidyterra,
+       RColorBrewer)
+
+#import functions
+source(here('code','0_functions.R'))
+
+```
+
+
+```{r logo, echo=FALSE, message=FALSE, warning=FALSE}
+htmltools::img(src = knitr::image_uri(here('input','dtra_logo.png')),
+               alt = "DTRA-NK logo",
+               style = 'position:absolute; top:0; right:0; padding:0; width:350px')
+```
+
+This document presents summary data and community maps from the DTRA-NK project in Samburu, Marsabit and Turkana counties.
+
+To date, `` `r length(read.csv(here('input','raw','DTRANK_individual_human.csv'))$hh_id %>% unique())` `` households have been sampled from `` `r ceiling(length(read.csv(here('input','raw','DTRANK_individual_human.csv'))$hh_id %>% unique()) /6)` `` communities.
+
+```{r sampling summary, echo=FALSE, message=FALSE, warning=FALSE}
+sample.sum <- read.csv(here('output','DTRANK_sample_summary.csv')) %>%
+  rename_with(~ str_replace_all(.,"\\.", " "))
+
+kable(sample.sum, caption='Samples & Data Collected by the DTRA-NK Project', align = c('l','c','c','c','c'))
+
+```
+
+```{r summary graphs, fig.show = "hold", fig.cap=c("Livestock species counts","Average household demographic structure","Age and gender structure of samples individuals by county"), out.width="30%"}
+knitr::include_graphics(here("..","output","graphics","livestock_species_sex_counts.png"))
+knitr::include_graphics(here("..","output","graphics","household_population_structure.png"))
+knitr::include_graphics(here("..","output","graphics","sampled_individuals_population_structure_by_county.png"))
+
+```
+
+## GPS statistics {.tabset}
+
+```{r}
+
+for (county in c('Samburu','Marsabit','Turkana')) {
+cat("### ",county, "{.tabset}\n\n")
+
+  
+}
+
+```
+
+For each tracked animal, a Home Range (HR) and Core Utilisation Distribution (CUD) have been calculated based on the 95th and 50th isopleth, respectively.
+These have been calculated using two methods:
+
+1) Kernel Density Estimation (KDE) - this employs smoothing function to define space utilisation and the HR and CUD are calculated from this model.
+
+2) Minimum Convex Polygon (MCP) - this is the smallest polygon with all internal angels less that 180deg that covers all the points. This is the simplest method and is used by IUCN for home range estimation.
+
+Both these methods assume independence of points, which is violated in this data due to the high frequency of location fixes (every 10 seconds). This will be corrected by using Autocorellated Kernel Density Estimation in the future.
+
+Additional statistics such as distance traveled, average speed and time of collar deployment are also presented.
+
+# ```{r GPS cleaning, echo=FALSE, message=FALSE, warning=FALSE}
+# 
+# #import gps track csv files
+# files <- list.files(here('input','raw','spatial','gps_collars'), full.names = T)
+# gps <- list()
+# # for (i in 1:length(files)) {
+# #   gps[[i]] <- read.csv(files[i])
+# # }
+# 
+# for (i in 1:length(files)) {
+#   gps[[tools::file_path_sans_ext(basename(files))[i]]] <- read.csv(files[i])
+# }
+# 
+# 
+# #create lists for results of spatial analysis
+# mk.track <- list() #tracks
+# 
+# #hr.50 <- vector("list",length(gps)) #home range
+# #hr.95 <- vector("list",length(gps))
+# 
+# #kde.50 <- vector("list",length(gps)) #kernel density estimate
+# #kde.95 <- vector("list",length(gps))
+# kde <- list()
+# 
+# #mcp.50 <- vector("list",length(gps)) #minimum convex polygon
+# #mcp.95 <- vector("list",length(gps))
+# mcp <- list()
+# 
+# #iso.50 <- vector("list",length(gps)) #isopleths
+# #iso.95 <- vector("list",length(gps))
+# #iso <- list()
+# 
+# gps.summary <- data.frame(index=1:length(gps))
+# 
+# tm.all <- list()
+# #sf_use_s2(FALSE)
+# ```
+
+
+# ```{r GPS cleaning loop, echo=FALSE, message=FALSE, warning=FALSE}
+# for (i in 1:length(gps)) {
+#   #### data cleaning & spatial analysis ####
+#   
+#   #gps[[i]] <- gps[[i]][!is.na(gps[[i]]$LONGITUDE.E.W),] #remove nas
+#   
+#   #remove N or S from value and make southern points negative
+#   # gps[[i]]$LATITUDE.N.S <- ifelse(substr(gps[[i]]$LATITUDE.N.S,10,10) == "N",
+#   #                                 as.numeric(substr(gps[[i]]$LATITUDE.N.S,1,9)),
+#   #                                 as.numeric(substr(gps[[i]]$LATITUDE.N.S,1,9))*-1) 
+#   gps[[i]] <- gps[[i]] %>% mutate(
+#     #tidy date and time columns
+#     #TIME = strptime(TIME, format = "%H:%M:%S"),
+#     TIME = format(strptime(sprintf("%06d", TIME), format="%H%M%S"), format = "%H:%M:%S"),
+#     DATE = as.Date(as.POSIXlt(strptime(DATE, format="%y%m%d"))),
+#     DATETIME = as.POSIXlt(paste(DATE, TIME), format = "%Y-%m-%d %H:%M:%S"),
+#     #remove N or S from latitude and make southern points negative
+#     LATITUDE.N.S = ifelse(substr(LATITUDE.N.S,10,10) == "N",
+#                           as.numeric(substr(LATITUDE.N.S,1,9)),
+#                           as.numeric(substr(LATITUDE.N.S,1,9))*-1) 
+#   )
+#   
+#   # #remove points within 20m of boma to accomadate GPS variability
+#   # gps[[i]] <- filter(gps[[i]], (gps[[i]]$LATITUDE.N.S>=(gps[[i]]$LATITUDE.N.S[1]+0.0002) | gps[[i]]$LATITUDE.N.S<=(gps[[i]]$LATITUDE.N.S[1]-0.0002)) 
+#   #                    & (gps[[i]]$LONGITUDE.E.W>=(gps[[i]]$LONGITUDE.E.W[1]+0.0002) | gps[[i]]$LONGITUDE.E.W<=(gps[[i]]$LONGITUDE.E.W[1]-0.0002)))
+#   # 
+#   # #take 1 point per minute
+#   # #gps[[i]] <- gps[[i]][seq(1, nrow(gps[[i]]), 60), ]
+#   # 
+#   # #update date & time
+#   # #gps[[i]]$TIME <- (gps[[i]]$TIME)+30000
+#   # #gps[[i]]$TIME <- format(strptime(sprintf("%06d", gps[[i]]$TIME), format="%H%M%S"), format = "%H:%M:%S")
+#   # 
+#   # #gps[[i]]$DATE <- gps[[i]]$DATE+20000000
+#   # #gps[[i]]$DATE <- as.Date(as.POSIXlt(strptime(gps[[i]]$DATE, format="%y%m%d")))
+#   # 
+#   # #gps[[i]]$DATETIME <- as.POSIXlt(paste(gps[[i]]$DATE, gps[[i]]$TIME), format = "%Y-%m-%d %H:%M:%S")
+#   # 
+#   # #reset row indeces & INDEX values
+#   # 
+#   # if(nrow(gps[[i]])>0){
+#   # row.names(gps[[i]]) <- NULL
+#   # gps[[i]]$INDEX <- seq(1:nrow(gps[[i]]))
+#   # }
+#   
+#   
+# }  
+# #remove collars with no points outside the boma
+# #gps <- gps[sapply(gps, nrow) >0]
+# 
+# 
+# ```
+
+
+# ```{r GPS maps, echo=FALSE, message=FALSE, warning=FALSE}
+# for (i in 1:length(gps)) { 
+#   #### GIS analysis ####
+#   
+#   #create tracks for amt package
+#   mk.track[[i]] <- make_track(tbl = gps[[i]] %>% distinct(DATETIME, .keep_all = T),
+#                               .x = LONGITUDE.E.W, .y = LATITUDE.N.S, .t = DATETIME,
+#                               crs = 4326, all_cols = T, check_duplicates = T, order_by_ts = T, verbose = T) %>%
+#     #remove duplicate, adjacent vertices so avoid issues with creating MCPs
+#     mutate(is_duplicate = lag(`x_`) == `x_` & lag(`y_`) == `y_`) %>%
+#     filter(!is_duplicate) %>%
+#     select(-is_duplicate)
+#   
+#   #kernel density estimates at 95 and 50 levels
+#   #kde.50[[i]] <- hr_kde(mk.track[[i]], levels = 0.50)
+#   #kde.95[[i]] <- hr_kde(mk.track[[i]], levels = 0.95)
+#   kde[[i]] <- hr_kde(mk.track[[i]], levels = c(0.5,0.95))
+#   
+#   kde[[i]]$iso <- hr_isopleths(kde[[i]])
+#   
+#   #minimum convex polygon at 95 and 50 levels
+#   #mcp.50[[i]] <- hr_mcp(mk.track[[i]], levels = 0.54) #mk.track[[57]] causes an error with duplicated vertices when using level = 50, 77 causes an error with level = 51
+#   #mcp.95[[i]] <- hr_mcp(mk.track[[i]], levels = 0.95) 
+#   mcp[[i]] <- hr_mcp(mk.track[[i]], levels = 0.95) #c(0.5,0.95)
+#   
+#   #isopleths at 50 and 95 levels, based on kde
+#   #iso.50[[i]] <- hr_isopleths(kde.50[[i]])
+#   #iso.95[[i]] <- hr_isopleths(kde.95[[i]])
+#   #iso[[i]] <- hr_isopleths(kde[[i]])
+#   
+#   #area calculations based on kde
+#   #hr.50[[i]] <- hr_area(kde.50[[i]])
+#   #hr.50[[i]]$area.km2 <- hr.50[[i]]$area*(1e-6)
+#   #hr.95[[i]] <- hr_area(kde.95[[i]])
+#   #hr.95[[i]]$area.km2 <- hr.95[[i]]$area*(1e-6)
+#   
+#   gps.summary$ID[i] <- str_remove_all(list.files(here('input','raw','spatial','gps_collars'))[i],'.csv')
+#   
+#   gps.summary$species[i] <- str_split_i(gps.summary$ID[i],'_',2)
+#   
+#   #home range estimate (95 isopleths) by MCP and KDE - converted to hectares (ha)
+#   gps.summary$hr.mcp.95.ha[i] <- round(as.numeric((mcp[[i]]$mcp %>% filter(level==0.95))$area) *0.0001,2)
+#   gps.summary$hr.kde.95.ha[i] <- round(as.numeric((kde[[i]]$iso %>% filter(level==0.95))$area)  *0.0001,2)
+#   
+#   #gps.summary$cud.kde.50.ha[i] <- round(hr_area(kde.50[[i]])$area *0.0001,2)
+#   #gps.summary$hr.kde.95.ha[i] <- round(hr_area(kde.95[[i]])$area *0.0001,2)
+#   
+#   #core utilisation distribution (50% isopleth) by MCP and KDE - converted to hectares (ha)
+#   gps.summary$cud.kde.50.ha[i] <- round(as.numeric((kde[[i]]$iso %>% filter(level==0.50))$area) *0.0001,2)
+#   #gps.summary$cud.mcp.50.ha[i] <- round(as.numeric((mcp[[i]]$mcp %>% filter(level==0.50))$area)  *0.0001,2)
+#   
+#   
+#   #### movement calculations ####
+#   
+#   #calculate length of the track in km
+#   gps.summary$dist.km[i] <- st_length(as_sf_lines(mk.track[[i]])) *0.001
+#   
+#   #calculate time difference
+#   gps.summary$time.h[i] <- round(as.numeric(difftime(gps[[i]]$DATETIME[nrow(gps[[i]])], gps[[i]]$DATETIME[1], units = "hours")),2)
+#   
+#   #calculate speed
+#   gps.summary$speed.kmh[i] <- round((gps.summary$dist.km[i])/gps.summary$time.h[i],2)
+#   
+#   #### NDVI ####
+#   # 
+#   # #import lansat rasters
+#   # lansat.red <- raster("C:/Users/sirim/Downloads/LC09_L2SP_168060_20220711_20220713_02_T1_SR_B4.TIF")
+#   # lansat.nir <- raster("C:/Users/sirim/Downloads/LC09_L2SP_168060_20220711_20220713_02_T1_SR_B5.TIF")
+#   # 
+#   # pts <- st_transform(as_sf_points(mk.track[[i]]), crs = st_crs(32637))
+#   # 
+#   # #crop rasters
+#   # lansat.red <- crop(lansat.red,extent(st_bbox(pts))+100)
+#   # lansat.nir <- crop(lansat.nir,extent(st_bbox(pts))+100)
+#   # 
+#   # #ndvi
+#   # ndvi <- (lansat.nir - lansat.red)/(lansat.nir + lansat.red)
+#   # 
+#   # #extract ndvi values
+#   # pts$NDVI <- raster::extract(ndvi, pts)
+#   # 
+#   # #calculate proportion of points that fall in each ndvi class
+#   # herd.data$ndvi1[i] <- (sum(pts$NDVI>0.0 & pts$NDVI<=0.1))/nrow(pts)
+#   # herd.data$ndvi2[i] <- (sum(pts$NDVI>0.1 & pts$NDVI<=0.2))/nrow(pts)
+#   # herd.data$ndvi3[i] <- (sum(pts$NDVI>0.2 & pts$NDVI<=0.3))/nrow(pts)
+#   # herd.data$ndvi4[i] <- (sum(pts$NDVI>0.3 & pts$NDVI<=0.4))/nrow(pts)
+#   # herd.data$ndvi5[i] <- (sum(pts$NDVI>0.4 & pts$NDVI<=0.5))/nrow(pts)
+#   # 
+#   # max(pts$NDVI) <=0.5
+#   # 
+#   # herd.data$mean.ndvi[i] <- mean(pts$NDVI)
+#   # #plot(lansat.red)
+#   # #plot(pts$geometry, add = T)
+#   
+#   #import ndvi
+#   #ndvi <- rast(here('input','spatial','rgb_ndvi_10m_2024_05','ndvi_10m.tif'))
+#   
+#   #### mapping & image export ####
+#   
+#   tm <- tm_shape(kde[[i]]$ud$lyr.1) + #ud$layer - if hr_akde is used
+#     tm_raster(palette = "BuPu", colorNA = "white", n = 20, legend.show = F) +
+#     tm_shape(mcp[[i]]$mcp%>% filter(level == 0.95)) + tm_borders(col = "red") + tm_add_legend(type = 'line', labels = 'HR by MCP',col = "red") +
+#     #tm_shape(mcp[[i]]$mcp%>% filter(level == 0.50)) + tm_borders(col = "red", lty = "dashed") +tm_add_legend(type = 'line', labels = 'CUD by MCP',lty = "dashed",col = "red") +
+#     tm_shape(kde[[i]]$iso %>% filter(level == 0.95)) + tm_borders(col = "blue") +tm_add_legend(type = 'line', labels = 'HR by KDE',col = "blue") +
+#     tm_shape(kde[[i]]$iso %>% filter(level == 0.50)) + tm_borders(col = "blue", lty = "dashed") +tm_add_legend(type = 'line', labels = 'CUD by KDE',lty = "dashed",col = "blue") +
+#     #tm_legend(title = 'Home range estimates') +
+#     tm_layout(title = paste("Home Range - ",gps.summary$ID[i]), asp = 1, frame = T, legend.show = T) +
+#     tm_scale_bar(position = c("left", "bottom")) +
+#     tm_compass(position = c("right", "bottom"))
+#     
+#   #save the file
+#   # tmap_save(tm, filename = here('output','spatial','HR_CUD_maps',paste0(gps.summary$ID[i],'_all.jpg')))
+#   #tmap_save(tm, filename = here('test_tmap.jpg'))
+#   
+#   #store the image in a list 
+#   tm.all[[i]] <- tm
+# 
+#   # kde.plot <- as.data.frame(kde[[i]]$ud$lyr.1, xy=T) %>%
+#   #   mutate(lyr.1 = ifelse(lyr.1 == 0.000000e+00, NA, lyr.1))
+#   # #plotting using ggplot
+#   # tm <- ggplot() + 
+#   #   #geom_spatraster(data=kde[[i]]$ud$lyr.1,aes(fill = lyr.1, colorNA = "white"), na.rm = T) +
+#   #   geom_raster(data=as.data.frame(kde[[i]]$ud$lyr.1, xy=T), aes(x=x,y=y,fill = lyr.1), na.rm = T) +
+#   #   scale_fill_gradient(low = "white", high = "#756bb1") +
+#   #   #scale_fill_gradientn(colors = brewer.pal(9, "PuRd"))
+#   #   geom_sf(data = (kde[[i]]$iso %>% filter(level == 0.95))$geometry, color = 'blue', fill = NA, colorNA = "white") +
+#   #   geom_sf(data = (kde[[i]]$iso %>% filter(level == 0.50))$geometry, color = 'blue', fill = NA, colorNA = "white", linetype = 'dashed') +
+#   #   
+#   #   geom_sf(data = (mcp[[i]]$mcp %>% filter(level == 0.95))$geometry, color = 'red', fill = NA, colorNA = "white") +
+#   #   geom_sf(data = (mcp[[i]]$mcp %>% filter(level == 0.50))$geometry, color = 'red', fill = NA, colorNA = "white", linetype = 'dashed')
+#   # #add north arrow, add scale, add title, add legend, remove background and axis labels
+#   # 
+#   # ggsave(here('test.png'), tm)
+#   # 
+#   
+#   #mapping & image export
+#   # tm.mcp <- tm_shape(kde.95[[i]]$ud$lyr.1) +
+#   #   tm_raster(palette = "BuPu", colorNA = "white", n = 20, legend.show = F) +
+#   #   tm_shape(mcp.95[[i]]$mcp) + tm_borders(col = "Red") +
+#   #   tm_shape(mcp.50[[i]]$mcp) + tm_borders(col = "Red", lty = "dashed") +
+#   #   tm_layout(title = paste("Home Range Minimum Convex Polygons - ",gps.summary$ID[i]), asp = 1, frame = T) +
+#   #   tm_scale_bar(position = c("left", "bottom"))
+#   
+#   #save the file
+#   #tmap_save(tm.mcp, filename = here('output','spatial',paste0(gps.summary$ID[i],'_MCP.jpg')))
+#   
+#   #mapping & image export
+#   # tm.kde <- tm_shape(kde.95[[i]]$ud$lyr.1) +
+#   #   tm_raster(palette = "BuPu", colorNA = "white", n = 20, legend.show = F) +
+#   #   tm_shape(iso.95[[i]]) + tm_borders(col = "blue") +
+#   #   tm_shape(iso.50[[i]]) + tm_borders(col = "blue", lty = "dashed") +
+#   #   tm_layout(title = paste("Home Range by Kernel Density Estimation - ",gps.summary$ID[i]), asp = 1, frame = T) +
+#   #   tm_scale_bar(position = c("left", "bottom"))
+#   
+#   #save the file
+#   #tmap_save(tm.kde, filename = here('output','spatial',paste0(gps.summary$ID[i],'_KDE.jpg')))
+#   
+#   
+#   
+#   ############ NDVI images ###########
+# } 
+# 
+# #calculate 
+# gps.sum.sp <- gps.summary %>% group_by(species) %>% summarise(across(where(is.numeric),mean), n = n()) %>% select(-index) %>%
+#   mutate(across(where(is.numeric), round, digits=2),
+#          species = str_to_title(species))
+# 
+# write.csv(gps.sum.sp, here('output','spatial','gps_summary_species.csv'), row.names = F)
+# 
+# colnames(gps.sum.sp) <- c('Species','HR by MCP (ha)','HR by KDE (ha)','CUD by KDE (ha)','Distance traveled (km)','Time with collar (h)','Mean speed (km/h)','Number of animals')
+# 
+# kable(gps.sum.sp, caption='Average GPS statistics for tracked animals, by species', align = c('l','c','c','c','c','c','c','c'))
+# 
+# #kable(gps.summary[,2:ncol(gps.summary)], caption = 'GPS statistics for all tracked animals',
+# #align = c('l','c','c','c','c','c','c','c'))# %>%
+# # kable_styling( bootstrap_options = c("condensed", "striped", "scale_down", "hold_position", "hover"), full_width = TRUE, font_size = 11)
+# ```
+
+```{r GPS maps per community, echo=FALSE, message=FALSE, warning=FALSE, results="asis"}
+#import household data
+hh <- read.csv(here('input','raw','DTRANK_HH_demography_livestock.csv'), na = '') %>%
+  filter(!is.na(gps_latitude)) %>%
+  st_as_sf(wkt = 'gps_wkt', crs = 'epsg:4326', remove = F) %>%
+  add_community_id()
+
+## testing creating list of line objects for plotting
+gps.line <- list()
+for (id in names(gps)) {
+  gps.line[[id]]$data <- gps[[id]]
+  gps.line[[id]]$points <-  st_as_sf(mk.track[[which(names(gps)==id)]],coords = c("x_", "y_"), crs = 4326)#st_as_sf(gps[[id]]$data, coords = c("LONGITUDE.E.W", "LATITUDE.N.S"), crs = 4326, remove = F) 
+  gps.line[[id]]$line <-  gps.line[[id]]$points %>%
+    st_combine() %>%
+    st_cast('LINESTRING')
+}
+
+
+for (community in unique(hh$ward)) {
+  cat('### ',str_to_title(community),'\n')
+  
+  com.hh <- hh %>% filter(ward == community)
+  
+  com.gps <- gps[grepl(com.hh$hh_id, names(gps))]
+  
+  com.map <- ggplot() +
+    geom_sf(data = com.hh, aes(fill = hh_id))
+  
+  for (hh.id in com.hh$hh_id) {
+    
+  }
+  
+}
+
+
+
+```
+
+## HR and CUD maps by species {.tabset}
+```{r GPS species tabs, echo=FALSE, message=FALSE, warning=FALSE, results="asis"}
+#create tabs of each species and print relevant maps for each species
+for (species in unique(gps.summary$species)) {
+  cat('### ',str_to_title(species),'\n')
+  
+  for (i in 1:length(tm.all)) {
+    if (gps.summary$species[i] == species) {
+      print(tm.all[[i]])
+      cat("\n")
+    }
+    cat("\n")
+  }
+  cat("\n")
+}
+
+```
+
