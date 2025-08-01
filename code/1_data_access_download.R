@@ -4,18 +4,29 @@
 
 ####setup----
 #need the development version of robotoolbox
-#remotes::install_gitlab("dickoa/robotoolbox")
+#remotes::install_gitlab("dickoa/robotoolbox", force = T)
 
-library(tidyverse)
-library(here)
-library(robotoolbox)
-library(dm)
-library(sf)
-library(httr)
-library(googledrive)
-library(DBI)
-library(RSQLite)
-library(readxl)
+# library(tidyverse)
+# library(here)
+# library(robotoolbox)
+# library(dm)
+# library(sf)
+# library(httr)
+# library(googledrive)
+# library(DBI)
+# library(RSQLite)
+# library(readxl)
+
+pacman::p_load(tidyverse,
+               here,
+               robotoolbox,
+               dm,
+               sf,
+               httr,
+               googledrive,
+               DBI,
+               RSQLite,
+               readxl)
 
 # #import functions
 source(here('code','0_functions.R'))
@@ -54,7 +65,7 @@ for (i in 1:nrow(kobo.projects)) {
       kobo.projects$name[i] != 'DTRANK_input_suppliers'){
     data <- kobo_data(
       kobo.projects$uid[i],
-      all_versions = kobo.projects$name[i] == 'DTRANK_HH_valuechain',
+      #all_versions = kobo.projects$name[i] == 'DTRANK_HH_valuechain',
       #lang = 'xml',
       progress = TRUE
     ) 
@@ -145,7 +156,7 @@ write.csv(kobo.data$DTRANK_HH_demography_livestock %>%
                                  ward)) %>%
             select(date, county, ward, community, hh_id) %>%
             arrange(date, hh_id),
-          here('output','community_household_id_reference.csv'),
+          here('output','DTRANK_community_household_id_reference.csv'),
           row.names = F,
           na = '')
 
@@ -243,9 +254,9 @@ for (data in c("DTRANK_HH_demography_livestock","DTRANK_HH_valuechain")) {
 
 ## HH IDs missing from datasets
 
-#in valuechain but missing from demography livestock
+#in valuechain but missing from demography livestock #DHH010008
 kobo.data$DTRANK_HH_valuechain$hh_id[kobo.data$DTRANK_HH_valuechain$hh_id %!in% kobo.data$DTRANK_HH_demography_livestock$hh_id]
-#in demography livestock but missing from valuechain
+#in demography livestock but missing from valuechain #DHH010006 and DHH010024
 kobo.data$DTRANK_HH_demography_livestock$hh_id[kobo.data$DTRANK_HH_demography_livestock$hh_id %!in% kobo.data$DTRANK_HH_valuechain$hh_id]
 
 #list2env(kobo.data,globalenv()) #only needed for testing- creates objects of all data in the global environment
@@ -427,6 +438,7 @@ for (i in 1:nrow(kobo.data$DTRANK_lab_results)) {
   #combine results from different plates
   lab$lab.qc <- if (i == 1) qc.test else bind_rows(lab$lab.qc, qc.test)
   lab$lab.results <- if (i == 1) media.file else bind_rows(lab$lab.results, media.file)
+  lab$lab.results <-  lab$lab.results %>% filter(str_starts(sample, "DLQ"))
 }
 
 write.csv(lab$lab.results, here('output','DTRANK_lab_results.csv'), row.names = F)
@@ -555,7 +567,8 @@ for (section in unique(kobo.data$DTRANK_GPS_vector$collection)) {
     gps.vector.data[[section]] <- kobo.data$DTRANK_GPS_vector %>% 
       # camel with ceres tag but no short term collar in DHH0100053
       mutate(gps_logger_id_initial = case_when(
-        `_uuid` == 'aab5f780-58a5-464f-936c-cae41509539f' ~ NA,
+        #`_uuid` == 'aab5f780-58a5-464f-936c-cae41509539f' ~ NA,
+        `hh_id` == 'DHH010053' ~ NA,
         TRUE ~ gps_logger_id_initial
       )) %>%
       select(date,county,ward,collection,hh_id,
@@ -606,10 +619,11 @@ if (sum(is.na(gps.vector.data$livestock$gps_logger_id))>1|anyNA(gps.vector.data$
   print(paste('NAs in date_retrieved column: ',sum(is.na(gps.vector.data$livestock$date_retrieved))))
 }
 
-# there will always be 1 NA in gps_logger_id and 3 NA in date_retrieved due to:
+# there will always be 1 NA in gps_logger_id and 3 (4) NA in date_retrieved due to:
 #a ceres tag deployed without a collar (camel from DHH0100053)
 #a lost collar #4 from a sheep in DHH0100073
 #a lost collar #1 from a goat in DHH010175
+#possibly another collar #3 from a goat in DHH010187 stopped working so no data
 
 #### download movement tracks ----
 ######livestock movement ----
@@ -728,7 +742,7 @@ for (i in 1:nrow(gps.vector.data$human)) {
         
       }
       
-      #some gpx files had to be convered in QGIS and output the data to the 'waypoints' layer, instead of the 'track_points' layer  
+      #some gpx files had to be loaded in QGIS and when saved, it output the data to the 'waypoints' layer, instead of the 'track_points' layer  
       media.file <- st_read(file_path, layer = ifelse(st_layers(file_path)$features[1]>0,'waypoints','track_points')) %>%
         mutate(lon = sf::st_coordinates(.)[,1],
                lat = sf::st_coordinates(.)[,2],
@@ -900,7 +914,8 @@ for (sheet in excel_sheets(here('input','raw','lab_results','cryobox.xlsx'))) {
     }
     subset_df <- cryobox[[sheet]][, col:min(col + 4, ncol(cryobox[[sheet]]))] %>% #take the 'Date Scanned column plus the next 4 columns
       rename_with(~c('date_scanned','aliquot','box_id','position','notes')) %>%
-      mutate(date_scanned = as.character(date_scanned))
+      mutate(date_scanned = as.character(date_scanned),
+             notes = as.character(notes))
     tables_list[[length(tables_list) + 1]] <- subset_df
   }
   
@@ -1160,7 +1175,7 @@ write.csv(sample.sum, here('output','DTRANK_sample_summary.csv'), row.names = F,
 
 #tidy remaining datasets & print to output folder
 
-for (dataset in c('DTRANK_RVFV_rapid_test','DTRANK_HH_valuechain','DTRANK_HH_demography_livestock','DTRANK_ecotones', 'DTRANK_input_suppliers','DTRANK_extension_service_providers','DTRANK_trap_booking','DTRANK_wildlife_site')) {
+for (dataset in c('DTRANK_RVFV_rapid_test','DTRANK_HH_valuechain','DTRANK_HH_demography_livestock','DTRANK_ecotones', 'DTRANK_trap_booking','DTRANK_wildlife_site')) {
   kobo.data[[dataset]] <- kobo.data[[dataset]] %>% tidy_strip_pii()
   
   write.csv(kobo.data[[dataset]],
@@ -1177,12 +1192,12 @@ sql.db <- dbConnect(drv = RSQLite::SQLite(),
 
 #add final datasets
 for (dataset in c('DTRANK_ecotones',
-                  'DTRANK_extension_service_providers',
+                  #'DTRANK_extension_service_providers',
                   'DTRANK_HH_demography_livestock',
                   'DTRANK_HH_valuechain',
                   'DTRANK_individual_human',
                   'DTRANK_individual_livestock',
-                  'DTRANK_input_suppliers',
+                  #'DTRANK_input_suppliers',
                   'DTRANK_RVFV_rapid_test',
                   'DTRANK_trap_booking',
                   'DTRANK_wildlife_sampling',
@@ -1220,17 +1235,18 @@ dbWriteTable(conn = sql.db,
              overwrite = T)
 
 #add activity space mapping
-dbWriteTable(conn = sql.db, 
-             name = 'DTRANK_activity_space_mapping_points',
-             value = activity.space.map$points %>%
-               st_drop_geometry(),
-             overwrite = T)
-dbWriteTable(conn = sql.db,
-             name = 'DTRANK_activity_space_mapping_areas',
-             value = activity.space.map$areas %>%
-               mutate(wkt = st_as_text(geometry)) %>%
-               st_drop_geometry(),
-             overwrite = T)
+# dbWriteTable(conn = sql.db, 
+#              name = 'DTRANK_activity_space_mapping',
+#              value = activity.space.map %>%
+#                st_drop_geometry(),
+#              overwrite = T)
+for (reps in names(activity.space.map)) {
+  dbWriteTable(conn = sql.db, 
+               name = paste0('DTRANK_activity_space_mapping_',reps),
+               value = activity.space.map[[reps]] %>%
+                 st_drop_geometry(),
+               overwrite = T)
+}
 
 
 #add lab results
@@ -1282,332 +1298,3 @@ upload_to_google(source.folder = here('output','images','wildlife'),
 
 ##end-------------------------------------------------------------------
 
-
-## testing -----
-
-
-## lab results code ####
-# box <- read.csv(here('input','Book2.csv'), na = '') %>% filter(!is.na(Aliquot))%>%
-#   mutate(
-#     Aliquot = str_to_upper(Aliquot),
-#     `Box.ID` = str_to_upper(`Box.ID`)
-#   ) %>%
-#   filter(Aliquot %in% rodents$secd_edta_1)
-# 
-# box2 <- readxl::read_xlsx(here('for sirimon.xlsx')) %>%
-#   mutate(
-#     Aliquot = str_to_upper(Aliquot),
-#     `Box ID` = str_to_upper(`Box ID`)
-#   ) %>%
-#   filter(Aliquot %in% rodents$secd_edta_1)
-# 
-# rodents <- DTRANK_wildlife_sampling %>% filter(secb_aclass == '1')
-# 
-# write.csv(box2, here('rodent_EDTA_positions.csv'), row.names = F)
-
-
-# #load packages
-# library(pacman)
-# p_load(tidyverse,
-#        #KoboconnectR,
-#        robotoolbox,
-#        dm,
-#        here,
-#        sf,
-#        httr
-#        #mailR
-# )
-# library(KoboconnectR)
-# 
-# #import functions
-# source(here('code','0_functions.R'))
-# 
-# ## setup ----
-# #set username and password for Kobo account
-# #!! SENSITIVE PASSWORD INFORMATION !!
-# uname <-  "dtrank_master"
-# pwd <-  "M!tchbc13579"
-# url <-  "kf.kobotoolbox.org"
-# 
-# #get Kobo API token
-# get_kobo_token(url=url, uname=uname, pwd=pwd)
-# #"1123cf35535bde15c4452187ba990a616dc492c0"
-# 
-# ##data download from Kobo server ------
-# 
-# #get projects available in the Kobo account
-# kobo.projects <- kobotools_api(url=url, simplified=T, uname=uname, pwd=pwd)
-# 
-# kobo.data <- list()
-# #download all data and save to .csv files
-# #NB takes a long time
-# for (i in 1:nrow(kobo.projects)) { #this excludes projects with no submission as they cause an error with the download
-#   if (kobo.projects$submissions[i]>0){
-#     data <- kobo_df_download(
-#       url = "kf.kobotoolbox.org",
-#       uname = uname,
-#       pwd = pwd,
-#       assetid = kobo.projects[i,2],
-#       all = "false",
-#       lang = "_xml",
-#       hierarchy = 'false',#ifelse(kobo.projects[i,2]=='aLLhyj2ffYCFkJSwxbuGH4','true',"false"), #to get hierarchy column names for GPS_vector data
-#       include_grp = "true",
-#       grp_sep = "/",
-#       fsep = ";",
-#       multi_sel = "both",
-#       media_url = "true",
-#       fields = NULL,
-#       sub_ids = NULL,
-#       sleep = 30 #increase this if internet is slow or errors occur
-#     ) %>%
-#       mutate(across(everything(), ~ replace(.x, (.x==''), NA))) %>%
-#       tidy_barcodes()
-#     
-#     kobo.data[[kobo.projects$name[i]]] <- data
-#     
-#     write.csv(data,
-#               file = here('input','raw',paste0(kobo.projects[i,1],'.csv')),
-#               row.names = F,
-#               na = '')
-#     
-#     print(paste(as.character(i),':',kobo.projects[i,1],'download and writing completed successfully'))
-#   }
-#   else {print(paste('There are no submissions for',kobo.projects[i,1],'so it has not been downloaded'))}
-# }
-# 
-# ## for loading data without downloading from server
-# files <- list.files(here('input','raw'), full.names = T, pattern = '.csv')
-# kobo.data <- list()
-# for (i in 1:length(files)) {
-#   kobo.data[[str_remove_all(list.files(here('input','raw'))[i],'.csv')]] <- read.csv(files[i])
-# }
-# 
-# #forms with repeats
-# ##activity space mapping
-# #forms with media
-# ##GPS vector- gps files
-# ##wildlife sampling- images
-# ##ecotones- images
-# ##FGD- audio, images
-# ##Cryobox sample booking
-# 
-# 
-# 
-# #activity space mapping with repeats -----
-# act.space.map <- kobo_xls_dl(
-#   url = url,
-#   uname = uname,
-#   pwd = pwd,
-#   assetid = "aHh7JzCQYQgFnrctbrNwGr",
-#   all = "false",
-#   lang = "_xml",
-#   hierarchy = "false",
-#   include_grp = "true",
-#   grp_sep = "/",
-#   multi_sel = "both",
-#   media_url = "true",
-#   fields = NULL,
-#   sub_ids = NULL,
-#   sleep = 2
-# )
-# 
-# #list2env(data,globalenv()) #only needed for testing- creates objects of all data in the global environment
-# 
-# #list of repeats with geoshape data
-# areas.data <- c("grazing_rep","crops_rep")
-# 
-# #sort spatial data in repeats into combined point and polygon objects
-# #create empty lists for point and area data
-# pts <- list()
-# area <- list()
-# 
-# for (type in names(act.space.map)[2:length(act.space.map)]) {
-#   #points data
-#   if (type %in% areas.data == F) {
-#     pts[[type]] <- left_join(act.space.map$DTRANK_activity_space_mapping,act.space.map[[type]], by=c('_id'='_submission__id')) %>%
-#       dplyr::mutate(
-#         location_type = str_remove(names(act.space.map[type]),'_rep'))# %>%
-#     #select(-starts_with('_'))
-#     #change column names so row_binding will create a single column for repeated variables
-#     names(pts[[type]]) <- str_remove_all(names(pts[[type]]),paste(paste0('_',str_remove_all(names(act.space.map[type]),'_rep')),
-#                                                                   paste0(str_remove_all(names(act.space.map[type]),'_rep'),'_'),
-#                                                                   sep = '|'))
-#     #area/geoshape/polygon data
-#   } else if (type %in% areas.data) {
-#     area[[type]] <- left_join(act.space.map$DTRANK_activity_space_mapping,act.space.map[[type]], by=c('_id'='_submission__id')) %>%
-#       dplyr::mutate(
-#         location_type = str_remove(names(act.space.map[type]),'_rep'))# %>%
-#     #select(-starts_with('_'))
-#     #change column names so row_binding will create a single column for repeated variables
-#     names(area[[type]]) <- str_remove_all(names(area[[type]]),paste(paste0('_',str_remove_all(names(act.space.map[type]),'_rep')),
-#                                                                     paste0(str_remove_all(names(act.space.map[type]),'_rep'),'_'),
-#                                                                     sep = '|'))
-#   }
-# }
-# 
-# #combine points data and create spatial object
-# points <- bind_rows(pts) %>%
-#   select(location_type, hh_id,date,
-#          everything(),
-#          -contains(c('yn','action_taken_','_count','_rep_count')),
-#          -c(start,end,dev_id),
-#          'waterpoint_type'='type','water_use_livestock_human'='livestock_human', 'gps_latitude'='_gps_latitude','gps_longitude'='_gps_longitude') %>%
-#   tidy_barcodes() %>%
-#   select(-starts_with('_'),-'gps') %>%
-#   filter(!is.na(gps_latitude)) %>%
-#   st_as_sf(coords = c('gps_latitude','gps_longitude'), crs = 'epsg:4326', remove = F)
-# #write to gpkg
-# st_write(points,
-#          dsn = here('input','raw','spatial','DTRANK_activity_space_mapping.gpkg'),
-#          layer = 'activity_space_mapping_points',
-#          append = F)
-# 
-# #combine polygon data and create spatial object
-# areas <- bind_rows(area) %>% 
-#   select(location_type, hh_id,date,
-#          everything(),
-#          -contains(c('yn','action_taken_','_count','_rep_count')),
-#          -c(start,end,dev_id)) %>%
-#   filter(!is.na(gps_area)) %>%
-#   select(-starts_with('_')) %>%
-#   tidy_barcodes() %>%
-#   mutate(geometry = wkt_geoshape(gps_area)) %>%
-#   st_as_sf(wkt = 'geometry', crs='epsg:4326')
-# #write to gpkg
-# st_write(areas,
-#          dsn = here('input','raw','spatial','DTRANK_activity_space_mapping.gpkg'),
-#          layer = 'activity_space_mapping_polygons',
-#          append = F)
-# 
-# ## GPS & vector data -----
-# # #download data for GPS_vector Kobo project
-# gps.vector <- kobo_df_download(
-#   url = "kf.kobotoolbox.org",
-#   uname = "dtrank_master",
-#   pwd = "M!tchbc13579",
-#   assetid = "aLLhyj2ffYCFkJSwxbuGH4", #change this to match the asset ID of the project which you want to download data for
-#   all = "false",
-#   lang = "_xml",
-#   hierarchy = "true",
-#   include_grp = "true",
-#   grp_sep = "/",
-#   fsep = ";",
-#   multi_sel = "both",
-#   media_url = "true",
-#   fields = NULL,
-#   sub_ids = NULL,
-#   sleep = 10 #increase this if internet is slow or errors occur
-# ) %>%
-#   mutate(across(everything(), ~ replace(.x, (.x==''), NA))) %>%
-#   tidy_barcodes()
-# 
-# ##create Ceres tag metadata table
-# #download existing metadata file from Mapipedia, copy this data into that file by matching the VIDs, then re-upload to Mapipedia
-# #this is important for the format of the csv file for Mapipedia to accept it
-# kobo.data[['DTRANK_individual_livestock']] %>%
-#   filter(long_term_selected == 'yes') %>%
-#   select('vid'='ceres_tag_vid',livestock_species,sex,county) %>%
-#   write.csv(file = here('output','ceres_metadata.csv'), row.names = F)
-# 
-# ##create combined datasets of animals with GPS collars
-# #extract GPS vector <- from list of datasets
-# #gps.vector <- kobo.data[['DTRANK_GPS_vector']] %>% tidy_barcodes() #this might not work because no hierarchical names are downloaded in the full download
-# 
-# 
-# #separate gps.vector data sections and save to a list
-# gps.vector.data <- list()
-# for (section in unique(gps.vector$collection)) {
-#   gps.vector.data[[section]] <- gps.vector %>% 
-#     select(date,county,ward,collection,hh_id,starts_with(paste0(ifelse(section=='initial'|section=='final', section,
-#                                                                        ifelse(section == 'environment','vectors_environment',
-#                                                                               'human_gps')),'.'))) %>%
-#     filter(collection == section) %>%
-#     rename_with(~str_remove_all(., c('.gps_info_initial|.vectors_initial|.gps_info_final|.vectors_final')))
-# }
-# 
-# #combine initial and final collar data
-# gps.collars <- full_join(gps.vector.data[['initial']],
-#                          gps.vector.data[['final']],
-#                          by=c('county',
-#                               'ward',
-#                               'hh_id',
-#                               'initial.livestock_species_initial'='final.livestock_species_final',
-#                               'initial.gps_logger_id_initial'='final.gps_logger_id_final')) %>% 
-#   select(hh_id,county,ward,
-#          'livestock_species'='initial.livestock_species_initial','gps_logger_id'='initial.gps_logger_id_initial',
-#          'date_deployed'='date.x','date_retrieved'='date.y',
-#          'ceres_tag_id'='initial.ceres_tag_vid_initial','ceres_tag_phone'='initial.ceres_tag_phone',
-#          'last_acaracide_treatment'='initial.acaracide_last_treat','acaracide_freq'='initial.acaracide_freq','acaracide_freq_other'='initial.acaracide_freq_other','acaracide_name'='initial.acaracide_name',
-#          contains('ticks'),
-#          'gps_track_file'='final.gps_track_file','gps_track_file_URL'='final.gps_track_file_URL',
-#          -'initial.gps_tick_initial',-'final.gps_tick_final')
-# 
-# write.csv(gps.collars, here('output','spatial','gps_collar_data.csv'), row.names = F)
-# 
-# 
-# #send email with GPS_vector data to @Abby Lilak ----- DOES NOT WORK ---
-# # send.mail(from = 'sirimonfbt@outlook.com',
-# #          to = c('a.lilak@ufl.edu','sirimon.thomas@ed.ac.uk'),
-# #          subject = 'DTRA-NK GPS_vector - latest data',
-# #          body = 'Dear Abby, Here is the latest GPS and vector data from the DTRA-NK project. Kind regards, Sirimon',
-# #          smtp = list(host.name = "smtp-mail.outlook.com", port = 587,
-# #                      user.name = "sirimonfbt@outlook.com",
-# #                      passwd = "Ziwani1011!", ssl = TRUE),
-# #          authenticate = TRUE,
-# #          send = TRUE,
-# #          attach.files = c(here('output','spatial','gps_collar_data.csv'),here('input','raw','DTRANK_GPS_vector.csv')))
-# 
-# 
-# #download each media file (.csv file with the movement tracks) from the URLs in gps.collars
-# #livestock movement
-# gps.collar.data <- list()
-# for (i in 1:nrow(gps.collars)) {
-#   if (!is.na(gps.collars$gps_track_file_URL[i]) & gps.collars$gps_track_file_URL[i] != ''){
-#     #download media file
-#     media.file <- content(GET(url = gps.collars$gps_track_file_URL[i],
-#                               config = authenticate(user=uname,password=pwd)),
-#                           as='text', encoding = 'UTF-8') %>% 
-#       #parse to dataframe
-#       read.table(text=., header = TRUE, fill = TRUE, sep = ",")
-#     #save to list for further cleaning
-#     gps.collar.data[[i]] <- media.file
-#     
-#     #export to folder
-#     write.csv(media.file,here('input','raw','spatial','gps_collars',paste0(gps.collars$hh_id[i],
-#                                                                            '_',
-#                                                                            gps.collars$livestock_species[i],
-#                                                                            '_',
-#                                                                            gps.collars$gps_logger_id[i],
-#                                                                            '.csv')),
-#               row.names = F,
-#               na = '')
-#   }
-# }
-# 
-# #human movement
-# gps.human.data <- list()
-# for (i in 1:nrow(gps.vector.data$human)) {
-#   if (!is.na(gps.vector.data$human$human_gps.gps_track_file_human_URL[i]) & 
-#       gps.vector.data$human$human_gps.gps_track_file_human_URL[i] != ''){
-#     #download media file
-#     media.file <- content(GET(url = gps.vector.data$human$human_gps.gps_track_file_human_URL[i],
-#                               config = authenticate(user=uname,password=pwd)),
-#                           as='text', encoding = 'UTF-8') %>% 
-#       #parse to dataframe
-#       read.table(text=., header = TRUE, fill = TRUE, sep = ",")
-#     #save to list for further cleaning
-#     gps.human.data[[i]] <- media.file
-#     
-#     #export to folder
-#     #might need to edit this if files are sent ot Kobo as .gpx
-#     write.csv(media.file,here('input','raw','spatial','human_movement',paste0(gps.vector.data$human$hh_id[i],
-#                                                                               '_',
-#                                                                               gps.vector.data$human$collection[i],
-#                                                                               '_',
-#                                                                               gps.vector.data$human$human_gps.gps_logger_id_human[i],
-#                                                                               '.csv')),
-#               row.names = F,
-#               na = '')
-#   }
-# }
-# 

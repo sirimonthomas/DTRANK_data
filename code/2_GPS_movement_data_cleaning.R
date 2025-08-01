@@ -4,8 +4,7 @@
 
 ###setup ----
 #load packages
-library(pacman)
-p_load(tidyverse,
+pacman::p_load(tidyverse,
        #robotoolbox,
        here,
        sf,
@@ -16,8 +15,14 @@ p_load(tidyverse,
        ctmm,
        move2,
        units,
-       leaflet)
+       leaflet,
+       geodata)
 
+# Arc 1960/UTM zone 37N : 'EPSG:21097'
+# WGS 84 : 'EPSG:4326'
+
+
+##old code----------------------------------------
 #import gps track csv files
 files <- list.files(here('input','raw','spatial','gps_collars'), full.names = T)
 gps <- list()
@@ -213,60 +218,59 @@ for (i in 1:length(gps)) {
 #import GPS data and tidy for movebank upload####
 ##short term GPS trackers----
 
-livestock.track <- st_read(here('output','spatial','DTRANK_livestock_GPS_vector_multipoint.gpkg'))
-human.track <- st_read(here('output','spatial','DTRANK_human_GPS_multipoint.gpkg'))
+#livestock.track <- st_read(here('output','spatial','DTRANK_livestock_GPS_vector_multipoint.gpkg'))
+#human.track <- st_read(here('output','spatial','DTRANK_human_GPS_multipoint.gpkg'))
 
 livestock.pts <- readRDS(here('output','spatial','DTRANK_livestock_pts_all.RDS'))
 human.pts <- readRDS(here('output','spatial','DTRANK_human_pts_all.RDS'))
 
 #create tracks from GPS points
 
-##activity space mapping data----
-particip.map <- st_read(here('output','spatial','DTRANK_activity_space_mapping.gpkg'))
+#activity space mapping data----
+act.space.map <- readRDS(here('output','spatial','DTRANK_activity_space_mapping.RDS'))
 
-##household gps points----
+#community reference data
+community.ref <- read.csv(here('output','DTRANK_community_household_id_reference.csv'))
 
 ####human----
-#test on single human record
-data <- human.pts[[1]]
-data.mt <- data %>% 
-  mutate(date_time = as_datetime(date_time)) %>%
-  mt_as_move2(coords = c('lon','lat'), crs = 4326, 
-              time_column = 'date_time', 
-              track_id_column = 'id',
-              track_attributes = c('hh_id','gps_logger_id_human')) %>%
-  mutate(azimuth = mt_azimuth(.),
-         turn_angle = mt_turnangle(.),
-         distance = mt_distance(., units = as_units('m')),
-         time_lag = mt_time_lags(.))
+# #test on single human record
+# data <- human.pts[[1]]
+# data.mt <- data %>% 
+#   mutate(date_time = as_datetime(date_time)) %>%
+#   mt_as_move2(coords = c('lon','lat'), crs = 4326, 
+#               time_column = 'date_time', 
+#               track_id_column = 'id',
+#               track_attributes = c('hh_id','gps_logger_id_human')) %>%
+#   mutate(azimuth = mt_azimuth(.),
+#          turn_angle = mt_turnangle(.),
+#          distance = mt_distance(., units = as_units('m')),
+#          time_lag = mt_time_lags(.))
 
 ## all tracks as same table
-data.mt <- bind_rows(human.pts) %>% 
+human.mt <- bind_rows(human.pts) %>% 
   mutate(date_time = as_datetime(date_time)) %>%
   mt_as_move2(coords = c('lon','lat'), crs = 4326, 
               time_column = 'date_time', 
               track_id_column = 'id',
               track_attributes = c('hh_id','gps_logger_id_human')) %>%
+  st_transform(crs = 21097) %>%
   mutate(azimuth = mt_azimuth(.),
          turn_angle = mt_turnangle(.),
-         distance = mt_distance(., units = as_units('m')),
+         distance = mt_distance(., units = as_units('m')), #need to project first to give meaningful distance measurement
          time_lag = mt_time_lags(.))
 
-mt_n_tracks(data.mt)
-hist(data.mt$time_lag)
+mt_n_tracks(human.mt)
+hist(human.mt$time_lag)
 
 #only track level data
-mt_track_data(data.mt)
+mt_track_data(human.mt)
 
 #make line object from points
-mt_track_lines(data.mt)
+mt_track_lines(human.mt)
 
 #autocorellation function acf()
-acf(data.mt$azimuth)
+acf(human.mt$azimuth)
 
-for (i in 1:length(human.pts)) {
-  
-}
 
 ####livestock----
 
@@ -291,6 +295,9 @@ space.map.poly <- st_read(here('output','spatial','DTRANK_activity_space_mapping
 
 
 ##interactive map----
-
+dtra.map <- leaflet() %>%
+    addTiles() %>%
+    setView(lng = -3.7, lat = 40.4, zoom = 5) %>%
+    addMarkers(lng = -3.7, lat = 40.4)
 
 
