@@ -9,7 +9,12 @@
 *.tif
 *.jpg
 *.png
-*.html
 *.gpkg
 *.sqlite
 *.xlsx
+*.RDS
+*.rds
+*.html
+*.RDS
+input/spatial/longitudinal/
+docs/

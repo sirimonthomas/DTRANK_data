@@ -139,8 +139,8 @@ for (j in c('DTRANK_wildlife_sampling','DTRANK_individual_human','DTRANK_individ
             na = '')
 } 
 
-#create community ID reference data
-write.csv(kobo.data$DTRANK_HH_demography_livestock %>%
+#### community ID reference ----
+community.ref <- kobo.data$DTRANK_HH_demography_livestock %>%
             arrange(ward, date) %>%
             group_by(ward) %>%
             mutate(
@@ -155,10 +155,13 @@ write.csv(kobo.data$DTRANK_HH_demography_livestock %>%
                                  paste(ward, as.character(session_id), sep = '_'),
                                  ward)) %>%
             select(date, county, ward, community, hh_id) %>%
-            arrange(date, hh_id),
+            arrange(date, hh_id)
+
+write.csv(community.ref,
           here('output','DTRANK_community_household_id_reference.csv'),
           row.names = F,
           na = '')
+
 
 #### data quality checks ----
 # check for data entry errors
@@ -260,6 +263,8 @@ kobo.data$DTRANK_HH_valuechain$hh_id[kobo.data$DTRANK_HH_valuechain$hh_id %!in% 
 kobo.data$DTRANK_HH_demography_livestock$hh_id[kobo.data$DTRANK_HH_demography_livestock$hh_id %!in% kobo.data$DTRANK_HH_valuechain$hh_id]
 
 #list2env(kobo.data,globalenv()) #only needed for testing- creates objects of all data in the global environment
+
+## errors in GPS livestock and individual livestock data
 
 #### summary stats & graphs ----
 #average household structure
@@ -477,20 +482,20 @@ st_write(activity.space.map$main %>% tidy_strip_pii(),
 #add hh id to each child table and make spatial
 for (rep in dm_get_all_fks(kobo.data$DTRANK_activity_space_mapping)$child_table) {
   activity.space.map[[str_remove(rep,'_rep')]] <- kobo.data$DTRANK_activity_space_mapping[[rep]] %>%
-  left_join(activity.space.map$main %>%
-              st_drop_geometry() %>%
-              select('hh_id', '_index'),
-            by = c('_parent_index'='_index'),
-            relationship = 'many-to-many') %>%
+    left_join(activity.space.map$main %>%
+                st_drop_geometry() %>%
+                select('hh_id', 'county','ward', '_index'),
+              by = c('_parent_index'='_index'),
+              relationship = 'many-to-many') %>%
     mutate(location_type = str_remove(rep,'_rep')) %>%
     tidy_strip_pii() %>%
     st_as_sf(wkt = select(.,contains('wkt')) %>% colnames(), crs=4326, remove = F)
   
   #write to gpkg
-st_write(activity.space.map[[str_remove(rep,'_rep')]],
-             dsn = here('output','spatial','DTRANK_activity_space_mapping.gpkg'),
-             layer = str_remove(rep,'_rep'),
-             append = F)
+  st_write(activity.space.map[[str_remove(rep,'_rep')]],
+           dsn = here('output','spatial','DTRANK_activity_space_mapping.gpkg'),
+           layer = str_remove(rep,'_rep'),
+           append = F)
 }
 
 #strip pii and tidy main activity space map
@@ -624,6 +629,37 @@ if (sum(is.na(gps.vector.data$livestock$gps_logger_id))>1|anyNA(gps.vector.data$
 #a lost collar #4 from a sheep in DHH0100073
 #a lost collar #1 from a goat in DHH010175
 #possibly another collar #3 from a goat in DHH010187 stopped working so no data
+
+## check livestock GPS vector data against individual livestock data to see if there are data entry errors
+gps.vect.ids <- paste0(gps.vector.data$livestock$hh_id,'_',
+                       gps.vector.data$livestock$livestock_species,'_',
+                       gps.vector.data$livestock$gps_logger_id)
+
+indiv.livestock <-kobo.data$DTRANK_individual_livestock %>%
+  filter(short_term_selected == 'yes') %>%
+  mutate(id = paste0(hh_id,'_',livestock_species,'_',gps_logger_id)) %>% pull(id)
+
+
+#in GPS_vector data but not in individual livestock data
+gps.vect.ids[!gps.vect.ids %in% indiv.livestock]
+
+#in individual livestock data but not in GPS_vector
+indiv.livestock[!indiv.livestock %in% gps.vect.ids]
+
+# check human GPS data against individual human data to check for data entry errors
+gps.vect.id.human <- paste0(gps.vector.data$human$hh_id,'_',
+                       gps.vector.data$human$gps_logger_id_human)
+
+indiv.human <-kobo.data$DTRANK_individual_human %>%
+  filter(movement_study == 'yes') %>%
+  mutate(id = paste0(hh_id,'_',gps_logger_id)) %>% pull(id)
+
+#in GPS_vector data but not in individual human data
+gps.vect.id.human[!gps.vect.id.human %in% indiv.human]
+
+#in individual human data but not in GPS_vector
+indiv.human[!indiv.human %in% gps.vect.id.human]
+
 
 #### download movement tracks ----
 ######livestock movement ----
@@ -786,7 +822,8 @@ for (file in list.files(here('input','raw','spatial','livestock'), pattern = '.c
       LONGITUDE.E.W = as.numeric(gsub('E','', LONGITUDE.E.W))
     ) %>%
     select(-any_of(c('INDEX','TAG'))) %>%
-    rename_with(tolower)
+    rename_with(tolower) %>%
+    left_join(community.ref, by = 'hh_id')
   
   # create joined data file with all GPS points
   
@@ -835,7 +872,8 @@ for (file in list.files(here('input','raw','spatial','human'), pattern = '.csv')
            hh_id = str_split(file,'_')[[1]][1],
            gps_logger_id_human = as.double(gsub('.csv','',str_split(file,'_')[[1]][3])),
            date = as.Date(date_time),
-           time = format(as.POSIXct(date_time), format="%H:%M:%S"))
+           time = format(as.POSIXct(date_time), format="%H:%M:%S"))#%>%
+    #left_join(community.ref, by = 'hh_id')
   
   # create joined data file with all GPS points
   
@@ -929,7 +967,15 @@ for (sheet in excel_sheets(here('input','raw','lab_results','cryobox.xlsx'))) {
 #combine all datasets into one table
 cryobox$all_samples <- bind_rows(cryobox) %>%
   arrange(box_id, position) %>%
-  mutate(box_id = toupper(box_id))
+  mutate(box_id = toupper(box_id),
+         aliquot = toupper(aliquot))
+
+#duplicated aliquot codes in cryobox file
+cryobox.duplicates <- cryobox$all_samples %>%
+  group_by(aliquot) %>%
+  filter(n() > 1) %>%
+  ungroup()
+
 
 #####livestock samples with box and position ----
 #add serum blood 1
@@ -1273,15 +1319,20 @@ upload_to_google(source.folder = here('output'),
                  dest.folder = 'DTRA-NK/Data/',
                  pattern = '.csv')
 
-#upload SQLite database - THIS IS 500MB PLUS SO AVOID UPLOADING
-upload_to_google(source.folder = here('output'),
-                 dest.folder = 'DTRA-NK/Data/',
-                 pattern = '.sqlite')
-
 #upload spatial objects
 upload_to_google(source.folder = here('output','spatial'),
                  dest.folder = 'DTRA-NK/Data/Spatial/',
                  pattern = '.gpkg')
+
+#upload spatial objects
+upload_to_google(source.folder = here('output','spatial'),
+                 dest.folder = 'DTRA-NK/Data/Spatial/',
+                 pattern = '.csv')
+
+#upload spatial objects
+upload_to_google(source.folder = here('output','spatial'),
+                 dest.folder = 'DTRA-NK/Data/Spatial/',
+                 pattern = '.RDS')
 
 #upload ecotone images
 upload_to_google(source.folder = here('output','images','ecotones'),
@@ -1293,6 +1344,10 @@ upload_to_google(source.folder = here('output','images','wildlife'),
                  dest.folder = 'DTRA-NK/Data/Images/Wildlife/',
                  pattern = '.jpg|.png')
 
+#upload SQLite database - THIS IS 500MB PLUS SO AVOID UPLOADING
+upload_to_google(source.folder = here('output'),
+                 dest.folder = 'DTRA-NK/Data/',
+                 pattern = '.sqlite')
 
 
 
